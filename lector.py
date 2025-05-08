@@ -1851,9 +1851,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 
-    if await manejar_precio(update, ctx, inv):
-        return
-
     if await manejar_catalogo(update, ctx):
         return
 
