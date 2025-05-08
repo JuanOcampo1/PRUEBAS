@@ -50,6 +50,25 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# 🔊 Función para generar audio con OpenAI TTS
+async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
+    try:
+        response = await client.audio.speech.create(
+            model="tts-1",
+            voice="nova",  # Puedes usar: nova, alloy, shimmer, etc.
+            input=texto
+        )
+        with open(nombre_archivo, "wb") as f:
+            f.write(await response.read())
+        return nombre_archivo
+    except Exception as e:
+        logging.error(f"❌ Error generando audio: {e}")
+        return None
+
+
 logging.basicConfig(level=logging.DEBUG)
 
 # CLIP: cargar modelo una sola vez
@@ -226,13 +245,14 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
         if mejor_modelo and mejor_sim >= 0.85:
-            return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
+            return f"✅ La imagen coincide con *{mejor_modelo}*"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
 
     except Exception as e:
         logging.exception(f"[CLIP] ❌ Error general:")
         return "⚠️ Ocurrió un problema analizando la imagen."
+
 
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
@@ -426,6 +446,7 @@ def es_comprobante_valido(texto: str) -> bool:
 
     logging.warning("[OCR DEBUG] ❌ No se encontró ninguna clave válida en el texto extraído.")
     return False
+
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
@@ -930,6 +951,35 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="👀 Solo necesito el número de referencia, como 261 o 277. Intenta de nuevo."
         )
         return
+    # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
+    if any(palabra in txt for palabra in (
+        "precio", "vale", "cuánto cuesta", "cuánto vale", "cuanto está", "vale cuánto", "vale esto"
+    )):
+        if est.get("modelo") and est.get("color"):
+            precio = next(
+                (i["precio"] for i in inv if
+                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
+                 normalize(i["modelo"]) == normalize(est["modelo"]) and
+                 normalize(i["color"]) == normalize(est["color"])),
+                None
+            )
+            if precio:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=f"💰 El modelo *{est['modelo']}* color *{est['color']}* tiene un precio de *${precio}* COP.",
+                    parse_mode="Markdown"
+                )
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="😕 Aún no tengo el precio exacto de ese modelo. Déjame verificarlo."
+                )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Para darte el precio necesito saber el modelo y color exacto. ¿Puedes decirme cuál estás mirando?"
+            )
+        return
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
@@ -1178,6 +1228,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # 📸 Imagen detectada — responder con modelo, color y PRECIO
+    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and path_local:
+        resultado = identificar_modelo_desde_clip(path_local)  # tu función
+        if resultado:
+            modelo_detectado, color_detectado = resultado
+            est["modelo"] = modelo_detectado
+            est["color"] = color_detectado
+            est["fase"] = "imagen_detectada"
+
+            # Buscar precio
+            precio = next(
+                (i["precio"] for i in inv if
+                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
+                 normalize(i["modelo"]) == normalize(modelo_detectado) and
+                 normalize(i["color"]) == normalize(color_detectado)),
+                None
+            )
+            est["precio_total"] = int(precio) if precio else None
+
+            mensaje = (
+                f"📸 La imagen coincide con *{modelo_detectado}* color *{color_detectado}*.\n"
+                f"✅ ¿Confirmas que es el modelo que deseas?"
+            )
+            if precio:
+                mensaje += f"\n💰 Ese modelo tiene un precio de *${precio}* COP."
+
+            mensaje += "\n\nResponde *sí* para continuar o *no* para elegir otro modelo."
+
+            await ctx.bot.send_message(chat_id=cid, text=mensaje, parse_mode="Markdown")
+            return
+
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
         if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
@@ -1203,7 +1284,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
-
 
     # 🛒 Flujo manual si está buscando modelo
     if est.get("fase") == "esperando_modelo":
@@ -1234,8 +1314,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # Normalizar entrada y colores
         colores_normalizados = {normalize(c): c for c in colores}
         entrada_normalizada = normalize(txt)
+        coincidencias = difflib.get_close_matches(entrada_normalizada, colores_normalizados.keys(), n=1, cutoff=0.6)
 
-       
         if coincidencias:
             color_seleccionado = colores_normalizados[coincidencias[0]]
             est["color"] = color_seleccionado
@@ -1291,6 +1371,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=menu_botones(tallas),
             )
         return
+
 
     # ✏️ Nombre del cliente
     if est.get("fase") == "esperando_nombre":
@@ -2090,6 +2171,42 @@ async def procesar_wa(cid: str, body: str) -> dict:
             "text": "¡Bienvenido a *X100🔥👟*!\n\nSi tienes una foto puedes enviarla\nSi tienes número de referencia, envíamelo\nPuedes enviarme la foto del pedido\n¿Te gustaría ver unos videos de nuestras referencias?\nCuéntame sin problema 😀"
         }
 
+    # 🔊 Si el usuario pide que le mandemos un audio
+    if any(frase in txt for frase in ("mandame un audio", "mándame un audio", "envíame un audio", "no sé leer", "leeme", "háblame", "háblame por voz")):
+        from openai import AsyncOpenAI
+        import os
+
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
+            try:
+                response = await client.audio.speech.create(
+                    model="tts-1",
+                    voice="nova",
+                    input=texto
+                )
+                with open(nombre_archivo, "wb") as f:
+                    f.write(await response.read())
+                return nombre_archivo
+            except Exception as e:
+                logging.error(f"❌ Error generando audio: {e}")
+                return None
+
+        texto_respuesta = "Hola 👋 soy tu asistente. Cuéntame qué modelo deseas adquirir hoy. Estoy para ayudarte."
+        ruta_audio = await generar_audio_openai(texto_respuesta, f"temp/audio_{cid}.mp3")
+
+        if ruta_audio and os.path.exists(ruta_audio):
+            return {
+                "type": "audio",
+                "path": ruta_audio,
+                "text": "🎧 Aquí tienes tu audio:"
+            }
+        else:
+            return {
+                "type": "text",
+                "text": "❌ No pude generar el audio en este momento. Intenta de nuevo más tarde."
+            }
+
     try:
         await responder(dummy_update, ctx)
 
@@ -2115,6 +2232,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
         except Exception as fallback_error:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
             return {"type": "text", "text": "⚠️ Hubo un error inesperado. Por favor intenta de nuevo."}
+
 @api.post("/venom")
 async def venom_webhook(req: Request):
     """Webhook principal que recibe los mensajes de Venom y procesa imagen, audio o texto."""
