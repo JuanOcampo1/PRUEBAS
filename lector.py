@@ -1242,15 +1242,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # 📸 Imagen detectada — responder con modelo, color y PRECIO
-    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and path_local:
-        resultado = identificar_modelo_desde_clip(path_local)  # tu función
+    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and 'path_local' in locals():
+        resultado = identificar_modelo_desde_clip(path_local)
         if resultado:
             modelo_detectado, color_detectado = resultado
             est["modelo"] = modelo_detectado
             est["color"] = color_detectado
             est["fase"] = "imagen_detectada"
 
-            # Buscar precio
             precio = next(
                 (i["precio"] for i in inv if
                  normalize(i["marca"]) == normalize(est.get("marca", "")) and
@@ -1271,6 +1270,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(chat_id=cid, text=mensaje, parse_mode="Markdown")
             return
+
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -2100,17 +2100,17 @@ async def responder_con_openai(mensaje_usuario):
                     "content": (
                         "Eres un asesor de ventas de la tienda de zapatos deportivos 'X100🔥👟'. "
                         "Solo vendemos nuestra propia marca *X100* (no manejamos marcas como Skechers, Adidas, Nike, etc.). "
-                        "Nuestros productos son 100% colombianos 🇨🇴 y hechos en Bucaramanga.\n\n"
+                        "Nuestros productos son 100% colombianos y hechos en Bucaramanga.\n\n"
                         "Tu objetivo principal es:\n"
                         "- Si preguntan por precio di, dime que referencia exacta buscas\n"
                         "- Siempre que puedas pedir la referencia del teni\n"
                         "- Pedir que envíe una imagen del zapato que busca 📸\n"
                         "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
-                        "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100.\n\n"
+                        "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100 y todo es unisex.\n\n"
                         "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
                         "- '¿Me puedes enviar la referencia del modelo que te interesa? 📋✨'\n"
                         "- '¿Quieres enviarme una imagen para ayudarte mejor? 📸'\n\n"
-                        "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 o 3 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
+                        "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
                         "Actúa como un asesor de ventas que siempre busca ayudar al cliente y CERRAR la compra de manera rápida, amigable y eficiente."
                     )
                 },
@@ -2354,7 +2354,7 @@ async def venom_webhook(req: Request):
                     logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
                     logging.info(f"🔍 Modelo detectado: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    # 4.5️⃣ Respuesta final
+                                        # 4.5️⃣ Respuesta final
                     if mejor_modelo and mejor_sim >= 0.85:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
@@ -2365,22 +2365,40 @@ async def venom_webhook(req: Request):
                             modelo=p[1] if len(p) > 1 else "Des.",
                             color="_".join(p[2:]) if len(p) > 2 else "Des."
                         )
+
+                        # 🔍 Buscar precio si es posible
+                        modelo = estado_usuario[cid].get("modelo")
+                        color = estado_usuario[cid].get("color")
+                        marca = estado_usuario[cid].get("marca")
+                        precio = next(
+                            (i["precio"] for i in inv if
+                             normalize(i["modelo"]) == normalize(modelo) and
+                             normalize(i["color"]) == normalize(color) and
+                             normalize(i["marca"]) == normalize(marca)),
+                            None
+                        )
+
+                        precio_str = f"{int(precio):,} COP" if precio else "No disponible"
+
                         return JSONResponse({
                             "type": "text",
                             "text": (
-                                f"✅ La imagen coincide con *{mejor_modelo}* "
-                                f"(confianza {mejor_sim:.2f})\n¿Continuamos? (SI/NO)"
-                            )
+                                f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
+                                f"💲 Su precio es: *{precio_str}* y hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                "¿Seguimos con la compra?"
+                            ),
+                            "parse_mode": "Markdown"
                         })
                     else:
                         reset_estado(cid)
                         return JSONResponse({
                             "type": "text",
                             "text": (
-                                "❌ No identifiqué un modelo con confianza suficiente. "
-                                "Intenta otra foto."
+                                "❌ No logré identificar bien el modelo de la imagen.\n"
+                                "¿Podrías enviarme otra foto un poco más clara?"
                             )
                         })
+
 
                 except Exception:
                     logging.exception("[CLIP] Error en identificación:")
