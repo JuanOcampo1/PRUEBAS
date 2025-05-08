@@ -2182,7 +2182,12 @@ async def procesar_wa(cid: str, body: str) -> dict:
         }
 
     # 🔊 Si el usuario pide que le mandemos un audio
-    if any(frase in txt for frase in ("mandame un audio", "mándame un audio", "envíame un audio", "no sé leer", "leeme", "háblame", "háblame por voz")):
+    if any(frase in txt for frase in (
+        "mandame un audio", "mándame un audio", "envíame un audio",
+        "puede enviarme un audio", "puedes enviarme un audio", "me puedes enviar un audio",
+        "háblame", "hábleme", "háblame por voz", "me puedes hablar",
+        "leeme", "léeme", "no sé leer", "no se leer", "no puedo leer"
+    )):
         logging.debug("🧠 Petición de audio detectada en el mensaje del usuario.")
         texto_respuesta = "Hola 👋 soy tu asistente. Cuéntame qué modelo deseas adquirir hoy. Estoy para ayudarte."
         ruta_audio = await generar_audio_openai(texto_respuesta, f"temp/audio_{cid}.mp3")
@@ -2197,6 +2202,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
         else:
             logging.error("❌ Falló la generación del audio o no se guardó correctamente.")
             ctx.resp.append("❌ No pude generar el audio en este momento. Intenta de nuevo más tarde.")
+
 
 
     try:
