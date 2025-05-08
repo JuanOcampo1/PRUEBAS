@@ -51,22 +51,35 @@ from telegram.ext import (
     filters,
 )
 
+
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # 🔊 Función para generar audio con OpenAI TTS
 async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
     try:
+        # Crear carpeta si no existe
+        os.makedirs("temp", exist_ok=True)
+        logging.debug("📁 Carpeta 'temp' verificada/creada")
+
+        # Generar audio con OpenAI TTS
+        logging.debug("🧠 Enviando solicitud a OpenAI TTS...")
         response = await client.audio.speech.create(
             model="tts-1",
-            voice="nova",  # Puedes usar: nova, alloy, shimmer, etc.
+            voice="nova",  # Opciones: alloy, shimmer, echo, etc.
             input=texto
         )
+
+        # Guardar archivo local
         with open(nombre_archivo, "wb") as f:
-            f.write(await response.read())
+            audio_data = await response.read()
+            f.write(audio_data)
+        logging.info(f"✅ Audio generado correctamente: {nombre_archivo}")
         return nombre_archivo
+
     except Exception as e:
         logging.error(f"❌ Error generando audio: {e}")
         return None
+
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -2173,39 +2186,21 @@ async def procesar_wa(cid: str, body: str) -> dict:
 
     # 🔊 Si el usuario pide que le mandemos un audio
     if any(frase in txt for frase in ("mandame un audio", "mándame un audio", "envíame un audio", "no sé leer", "leeme", "háblame", "háblame por voz")):
-        from openai import AsyncOpenAI
-        import os
-
-        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-        async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
-            try:
-                response = await client.audio.speech.create(
-                    model="tts-1",
-                    voice="nova",
-                    input=texto
-                )
-                with open(nombre_archivo, "wb") as f:
-                    f.write(await response.read())
-                return nombre_archivo
-            except Exception as e:
-                logging.error(f"❌ Error generando audio: {e}")
-                return None
-
+        logging.debug("🧠 Petición de audio detectada en el mensaje del usuario.")
         texto_respuesta = "Hola 👋 soy tu asistente. Cuéntame qué modelo deseas adquirir hoy. Estoy para ayudarte."
         ruta_audio = await generar_audio_openai(texto_respuesta, f"temp/audio_{cid}.mp3")
 
         if ruta_audio and os.path.exists(ruta_audio):
-            return {
+            logging.info(f"✅ Audio generado para {cid}: {ruta_audio}")
+            ctx.resp.append({
                 "type": "audio",
                 "path": ruta_audio,
                 "text": "🎧 Aquí tienes tu audio:"
-            }
+            })
         else:
-            return {
-                "type": "text",
-                "text": "❌ No pude generar el audio en este momento. Intenta de nuevo más tarde."
-            }
+            logging.error("❌ Falló la generación del audio o no se guardó correctamente.")
+            ctx.resp.append("❌ No pude generar el audio en este momento. Intenta de nuevo más tarde.")
+
 
     try:
         await responder(dummy_update, ctx)
