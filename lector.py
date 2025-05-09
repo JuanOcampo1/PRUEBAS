@@ -2234,6 +2234,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
 @api.post("/venom")
 async def venom_webhook(req: Request):
     """Webhook principal que recibe los mensajes de Venom y procesa imagen, audio o texto."""
+    inv = await obtener_inventario()  # 👈 Aquí va el await
     try:
         # 1️⃣ Leer JSON ------------------------------------------------------
         data = await req.json()
@@ -2243,6 +2244,7 @@ async def venom_webhook(req: Request):
         mimetype = (data.get("mimetype") or "").lower()
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype} — MIME: {mimetype}")
+
 
         # 2️⃣ IMAGEN ---------------------------------------------------------
         if mtype == "image" or mimetype.startswith("image"):
@@ -2373,6 +2375,7 @@ async def venom_webhook(req: Request):
                         )
 
                         # 🔍 Buscar precio si es posible
+
                         modelo = estado_usuario[cid].get("modelo")
                         color = estado_usuario[cid].get("color")
                         marca = estado_usuario[cid].get("marca")
