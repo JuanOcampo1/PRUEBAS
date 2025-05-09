@@ -2234,16 +2234,41 @@ async def procesar_wa(cid: str, body: str) -> dict:
 @api.post("/venom")
 async def venom_webhook(req: Request):
     """Webhook principal que recibe los mensajes de Venom y procesa imagen, audio o texto."""
-    inv = await obtener_inventario()  # 👈 Aquí va el await
+
+    # 0️⃣  INVENTARIO  ──────────────────────────────────────────────────────
+    #  🔸  NO uses await:  obtener_inventario() ya devuelve la lista.
+    inv = obtener_inventario()           # ⬅️  quitá el await
+
     try:
-        # 1️⃣ Leer JSON ------------------------------------------------------
+        # 1️⃣  JSON DEL MENSAJE  ───────────────────────────────────────────
         data = await req.json()
-        cid = wa_chat_id(data.get("from", ""))
-        body = data.get("body", "") or ""
-        mtype = (data.get("type") or "").lower()
+        cid      = wa_chat_id(data.get("from", ""))
+        body     = data.get("body", "") or ""
+        mtype    = (data.get("type") or "").lower()
         mimetype = (data.get("mimetype") or "").lower()
 
-        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype} — MIME: {mimetype}")
+        logging.info(
+            f"📩 Mensaje recibido — CID:{cid} — Tipo:{mtype} — MIME:{mimetype}"
+        )
+
+        # 2️⃣  FILTROS PARA NO RESPONDER CHATS VIEJOS/NOTIFICACIONES  ──────
+        if (
+            data.get("isForwarded")            # reenviados
+            or data.get("isNotification")      # notificaciones del sistema
+            or data.get("type") == "e2e_notification"
+            or data.get("fromMe")              # enviados por tu propio bot
+            or data.get("isSentByMe")          # (algunas versiones de Venom)
+            or data.get("isGroupMsg")          # mensajes de grupos
+            or not body                        # mensajes vacíos
+        ):
+            logging.warning(f"[VENOM] Ignorado — CID:{cid}")
+            return {"status": "ignored"}
+
+
+        # ───────────────────────────────────────────────────────────────────
+        #  A partir de acá continúa TODO tu código (imagen, texto, audio…)
+        # ───────────────────────────────────────────────────────────────────
+
 
 
         # 2️⃣ IMAGEN ---------------------------------------------------------
