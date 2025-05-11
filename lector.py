@@ -1678,7 +1678,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["sale_id"] = sale_id
         est["resumen"] = {
             "Número Venta": sale_id,
-            "Fecha Venta": datetime.datetime.now().isoformat(),
+            "Fecha Venta": datetime.now().isoformat(),
             "Cliente": est["nombre"],
             "Teléfono": est["telefono"],
             "Cédula": est["cedula"],
