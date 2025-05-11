@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from types import SimpleNamespace
 import subprocess
-
+import time
 # ——— Librerías externas ———
 import numpy as np
 import torch
@@ -946,7 +946,7 @@ def registrar_orden(data: dict, fase: str = ""):
 
 # 🔥 Generar ID único para una venta
 def generate_sale_id() -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d%H%M%S")  # ✅ sin datetime.datetime
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
@@ -2311,24 +2311,38 @@ async def responder_con_openai(mensaje_usuario):
 
 
 # 4. Procesar mensaje de WhatsApp
-async def procesar_wa(cid: str, body: str) -> dict:
-    cid = str(cid)  # 🔐 Asegura que el ID sea string SIEMPRE
+# 4. Procesar mensaje de WhatsApp
+async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
+    cid = str(cid)                                       # 🔐 ID siempre string
     texto = body.lower() if body else ""
-    txt = texto if texto else ""
+    txt   = texto if texto else ""
 
+    # ─── FILTRO 1: mensaje vacío ───
+    if not body or not body.strip():
+        print(f"[IGNORADO] Mensaje vacío de {cid}")
+        return {"type": "text", "text": ""}
+
+    # ─── FILTRO 2: anti‑duplicados (<30 s) ───
+    DEDUP_WINDOW = 30  # segundos
+    now   = time.time()
+    info  = ultimo_msg.get(cid)
+    if info and msg_id and msg_id == info["id"] and now - info["t"] < DEDUP_WINDOW:
+        print(f"[IGNORADO] Duplicado reciente de {cid}")
+        return {"type": "text", "text": ""}
+    if msg_id:
+        ultimo_msg[cid] = {"id": msg_id, "t": now}
+
+    # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
-        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+        async def bot_send(self, chat_id, text, **kw):        self.resp.append(text)
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
         async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
-
-    # 👇 Define ctx primero
     ctx = DummyCtx(resp=[])
 
-    # 👇 Ahora sí define ctx.bot correctamente
     ctx.bot = SimpleNamespace(
-        send_message=ctx.bot_send,
-        send_chat_action=ctx.bot_send_chat_action,
-        send_video=ctx.bot_send_video
+        send_message      = ctx.bot_send,
+        send_chat_action  = ctx.bot_send_chat_action,
+        send_video        = ctx.bot_send_video
     )
 
     class DummyMsg(SimpleNamespace):
@@ -2338,79 +2352,78 @@ async def procesar_wa(cid: str, body: str) -> dict:
             self.voice = voice
             self.audio = audio
             self._ctx = ctx
-
         async def reply_text(self, text, **kw):
             self._ctx.resp.append(text)
 
-    dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
+    dummy_msg = DummyMsg(text=body, ctx=ctx)
     dummy_update = SimpleNamespace(
-        message=dummy_msg,
-        effective_chat=SimpleNamespace(id=cid)
+        message        = dummy_msg,
+        effective_chat = SimpleNamespace(id=cid)
     )
 
-    # 🧠 Revisa si el estado no existe o está vacío
+    # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
-    # 💬 Si es saludo o /start, siempre responde algo básico
-    if texto in ["/start", "start", "hola", "buenas", "hey"]:
+    # 💬 Saludo / start
+    if texto in ("/start", "start", "hola", "buenas", "hey"):
         logging.info("[BOT] Comando /start o saludo detectado.")
         reset_estado(cid)
         return {
             "type": "text",
-            "text": "¡Bienvenido a *X100🔥👟*!\n\nSi tienes una foto puedes enviarla\nSi tienes número de referencia, envíamelo\nPuedes enviarme la foto del pedido\n¿Te gustaría ver unos videos de nuestras referencias?\nCuéntame sin problema 😀"
+            "text": ("¡Bienvenido a *X100🔥👟*!\n\n"
+                     "Si tienes una foto puedes enviarla\n"
+                     "Si tienes número de referencia, envíamelo\n"
+                     "¿Te gustaría ver unos videos de nuestras referencias?\n"
+                     "Cuéntame sin problema 😀")
         }
 
-    # 🔊 Si el usuario pide que le mandemos un audio
+    # 🔊 Petición de audio
     if any(frase in txt for frase in (
         "mandame un audio", "mándame un audio", "envíame un audio",
         "puede enviarme un audio", "puedes enviarme un audio", "me puedes enviar un audio",
         "háblame", "hábleme", "háblame por voz", "me puedes hablar",
         "leeme", "léeme", "no sé leer", "no se leer", "no puedo leer"
     )):
-        logging.debug("🧠 Petición de audio detectada en el mensaje del usuario.")
-        texto_respuesta = "Hola 👋 soy tu asistente. Cuéntame qué modelo deseas adquirir hoy. Estoy para ayudarte."
+        logging.debug("🧠 Petición de audio detectada.")
+        texto_respuesta = ("Hola 👋 soy tu asistente. "
+                           "Cuéntame qué modelo deseas adquirir hoy.")
         ruta_audio = await generar_audio_openai(texto_respuesta, f"temp/audio_{cid}.mp3")
 
         if ruta_audio and os.path.exists(ruta_audio):
-            logging.info(f"✅ Audio generado para {cid}: {ruta_audio}")
-            ctx.resp.append({
-                "type": "audio",
-                "path": ruta_audio,
-                "text": "🎧 Aquí tienes tu audio:"
-            })
+            ctx.resp.append({"type": "audio", "path": ruta_audio,
+                             "text": "🎧 Aquí tienes tu audio:"})
         else:
-            logging.error("❌ Falló la generación del audio o no se guardó correctamente.")
-            ctx.resp.append("❌ No pude generar el audio en este momento. Intenta de nuevo más tarde.")
+            ctx.resp.append("❌ No pude generar el audio en este momento.")
 
-
-
+    # ─── MAIN try/except ───
     try:
         await responder(dummy_update, ctx)
 
         if ctx.resp:
-            print(f"[DEBUG] BOT respondió correctamente: {ctx.resp}")
+            print(f"[DEBUG] BOT respondió: {ctx.resp}")
             return {"type": "text", "text": "\n".join(ctx.resp)}
-        else:
-            est = estado_usuario.get(cid, {})
-            if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
-                print("[DEBUG] Fase crítica: el bot no respondió pero no se usará IA.")
-                return {"type": "text", "text": "💬 Estoy esperando que confirmes tu método de pago o me envíes el comprobante. 📸"}
 
-            print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
-            respuesta_ia = await responder_con_openai(body)
-            return {"type": "text", "text": respuesta_ia or "🤖 Estoy teniendo problemas, pero ya estoy revisando..."}
+        est = estado_usuario.get(cid, {})
+        if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
+            return {"type": "text",
+                    "text": "💬 Espero tu método de pago o comprobante. 📸"}
+
+        print(f"[DEBUG] BOT en silencio → usar IA para: {body}")
+        respuesta_ia = await responder_con_openai(body)
+        return {"type": "text", "text": respuesta_ia or "🤖 Estoy revisando el sistema…"}
 
     except Exception as e:
         print(f"🔥 Error interno en procesar_wa(): {e}")
-        print(f"[DEBUG] Usando IA como fallback por error de bot en mensaje: {body}")
         try:
             respuesta_ia = await responder_con_openai(body)
-            return {"type": "text", "text": respuesta_ia or "🤖 Estoy teniendo problemas, pero ya estoy revisando..."}
+            return {"type": "text",
+                    "text": respuesta_ia or "⚠️ Hubo un error inesperado. Intenta de nuevo."}
         except Exception as fallback_error:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
-            return {"type": "text", "text": "⚠️ Hubo un error inesperado. Por favor intenta de nuevo."}
+            return {"type": "text",
+                    "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
 
 @api.post("/venom")
 async def venom_webhook(req: Request):
