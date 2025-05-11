@@ -2309,11 +2309,11 @@ async def responder_con_openai(mensaje_usuario):
         logging.error(f"Error al consultar OpenAI: {e}")
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
 
-
+# ─────────────────────────────────────────────────────────────
 # 4. Procesar mensaje de WhatsApp
-# 4. Procesar mensaje de WhatsApp
+# ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid = str(cid)                                       # 🔐 ID siempre string
+    cid = str(cid)                                   # 🔐 ID siempre string
     texto = body.lower() if body else ""
     txt   = texto if texto else ""
 
@@ -2323,9 +2323,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         return {"type": "text", "text": ""}
 
     # ─── FILTRO 2: anti‑duplicados (<30 s) ───
-    DEDUP_WINDOW = 30  # segundos
-    now   = time.time()
-    info  = ultimo_msg.get(cid)
+    DEDUP_WINDOW = 30
+    now  = time.time()
+    info = ultimo_msg.get(cid)
     if info and msg_id and msg_id == info["id"] and now - info["t"] < DEDUP_WINDOW:
         print(f"[IGNORADO] Duplicado reciente de {cid}")
         return {"type": "text", "text": ""}
@@ -2334,24 +2334,25 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
-        async def bot_send(self, chat_id, text, **kw):        self.resp.append(text)
+        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
-        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
+        async def bot_send_video(self, chat_id, video, caption=None, **kw):
+            self.resp.append(f"[VIDEO] {caption or ' '}]")
     ctx = DummyCtx(resp=[])
 
     ctx.bot = SimpleNamespace(
-        send_message      = ctx.bot_send,
-        send_chat_action  = ctx.bot_send_chat_action,
-        send_video        = ctx.bot_send_video
+        send_message     = ctx.bot_send,
+        send_chat_action = ctx.bot_send_chat_action,
+        send_video       = ctx.bot_send_video
     )
 
     class DummyMsg(SimpleNamespace):
         def __init__(self, text, ctx, photo=None, voice=None, audio=None):
-            self.text = text
+            self.text  = text
             self.photo = photo
             self.voice = voice
             self.audio = audio
-            self._ctx = ctx
+            self._ctx  = ctx
         async def reply_text(self, text, **kw):
             self._ctx.resp.append(text)
 
@@ -2368,7 +2369,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # 💬 Saludo / start
     if texto in ("/start", "start", "hola", "buenas", "hey"):
-        logging.info("[BOT] Comando /start o saludo detectado.")
         reset_estado(cid)
         return {
             "type": "text",
@@ -2380,20 +2380,17 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         }
 
     # 🔊 Petición de audio
-    if any(frase in txt for frase in (
+    if any(f in txt for f in (
         "mandame un audio", "mándame un audio", "envíame un audio",
         "puede enviarme un audio", "puedes enviarme un audio", "me puedes enviar un audio",
         "háblame", "hábleme", "háblame por voz", "me puedes hablar",
         "leeme", "léeme", "no sé leer", "no se leer", "no puedo leer"
     )):
-        logging.debug("🧠 Petición de audio detectada.")
         texto_respuesta = ("Hola 👋 soy tu asistente. "
                            "Cuéntame qué modelo deseas adquirir hoy.")
         ruta_audio = await generar_audio_openai(texto_respuesta, f"temp/audio_{cid}.mp3")
-
         if ruta_audio and os.path.exists(ruta_audio):
-            ctx.resp.append({"type": "audio", "path": ruta_audio,
-                             "text": "🎧 Aquí tienes tu audio:"})
+            ctx.resp.append({"type": "audio", "path": ruta_audio, "text": "🎧 Aquí tienes tu audio:"})
         else:
             ctx.resp.append("❌ No pude generar el audio en este momento.")
 
@@ -2402,7 +2399,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         await responder(dummy_update, ctx)
 
         if ctx.resp:
-            print(f"[DEBUG] BOT respondió: {ctx.resp}")
             return {"type": "text", "text": "\n".join(ctx.resp)}
 
         est = estado_usuario.get(cid, {})
@@ -2410,7 +2406,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             return {"type": "text",
                     "text": "💬 Espero tu método de pago o comprobante. 📸"}
 
-        print(f"[DEBUG] BOT en silencio → usar IA para: {body}")
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia or "🤖 Estoy revisando el sistema…"}
 
@@ -2424,6 +2419,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
             return {"type": "text",
                     "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
+
 
 @api.post("/venom")
 async def venom_webhook(req: Request):
