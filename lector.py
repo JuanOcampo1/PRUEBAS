@@ -50,6 +50,8 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+# 🧠 Anti-duplicados por mensaje ID
+ultimo_msg = {}
 
 # ID del archivo clientes.json en Google Drive
 CLIENTES_JSON_FILE_ID = "13euT2mtVwO4qWjhiWNAo-0DZFPTmjy0X"
