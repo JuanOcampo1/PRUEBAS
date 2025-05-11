@@ -81,16 +81,23 @@ def descargar_memoria_clientes():
 
 def subir_memoria_clientes(memoria_dict):
     service = get_drive_service()
-    fh = io.BytesIO()
-    json.dump(memoria_dict, fh, ensure_ascii=False, indent=4)
-    fh.seek(0)
 
-    media_body = MediaIoBaseUpload(fh, mimetype='application/json', resumable=True)
+    # 🔁 Primero escribe el JSON como texto
+    str_io = io.StringIO()
+    json.dump(memoria_dict, str_io, ensure_ascii=False, indent=4)
+    str_io.seek(0)
+
+    # 🔁 Luego lo conviertes a bytes
+    byte_io = io.BytesIO(str_io.read().encode("utf-8"))
+    byte_io.seek(0)
+
+    media_body = MediaIoBaseUpload(byte_io, mimetype='application/json', resumable=True)
 
     service.files().update(
         fileId=CLIENTES_JSON_FILE_ID,
         media_body=media_body
     ).execute()
+
 
 def limpiar_memoria_vencida(memoria):
     ahora = datetime.now()
