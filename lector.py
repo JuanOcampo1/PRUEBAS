@@ -949,7 +949,7 @@ def generate_sale_id() -> str:
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
-
+    numero = str(cid)
     # 1) Primer contacto: saludo
     if cid not in estado_usuario:
         reset_estado(cid)
