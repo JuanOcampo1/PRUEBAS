@@ -1,40 +1,40 @@
 # ——— Librerías estándar de Python ———
 import os
 import io
+import re
+import json
 import base64
 import logging
-import json
-import re
-import requests
 import random
 import string
-import datetime
-import unicodedata
-import difflib
+import requests
 import asyncio
-from types import SimpleNamespace
+import difflib
+import unicodedata
+from datetime import datetime, timedelta
 from collections import defaultdict
-from transformers import CLIPModel, CLIPProcessor
+from types import SimpleNamespace
 import subprocess
-import torch
-from torchvision import transforms
 
 # ——— Librerías externas ———
-from dotenv import load_dotenv
+import numpy as np
+import torch
+import nest_asyncio
 from PIL import Image
+from dotenv import load_dotenv
+from transformers import CLIPModel, CLIPProcessor
+from torchvision import transforms
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
-import nest_asyncio
 from openai import AsyncOpenAI
-import numpy as np
 
-# Google Cloud
+# ——— Google Cloud & Drive ———
 from google.cloud import vision
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
-# Telegram
+# ——— Telegram ———
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -50,6 +50,70 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
+# ID del archivo clientes.json en Google Drive
+CLIENTES_JSON_FILE_ID = "13euT2mtVwO4qWjhiWNAo-0DZFPTmjy0X"
+DURACION_MEMORIA_DIAS = 30
+
+def get_drive_service():
+    creds_json = os.getenv("GOOGLE_CREDS_JSON")
+    creds_dict = json.loads(creds_json)
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/drive"])
+    return build("drive", "v3", credentials=creds)
+
+def descargar_memoria_clientes():
+    service = get_drive_service()
+    request = service.files().get_media(fileId=CLIENTES_JSON_FILE_ID)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+
+    fh.seek(0)
+    try:
+        memoria = json.load(fh)
+    except json.JSONDecodeError:
+        memoria = {}
+
+    return memoria
+
+def subir_memoria_clientes(memoria_dict):
+    service = get_drive_service()
+    fh = io.BytesIO()
+    json.dump(memoria_dict, fh, ensure_ascii=False, indent=4)
+    fh.seek(0)
+
+    media_body = MediaIoBaseUpload(fh, mimetype='application/json', resumable=True)
+
+    service.files().update(
+        fileId=CLIENTES_JSON_FILE_ID,
+        media_body=media_body
+    ).execute()
+
+def limpiar_memoria_vencida(memoria):
+    ahora = datetime.now()
+    nueva_memoria = {}
+    for numero, datos in memoria.items():
+        fecha = datetime.fromisoformat(datos.get("fecha", "2000-01-01"))
+        if ahora - fecha <= timedelta(days=DURACION_MEMORIA_DIAS):
+            nueva_memoria[numero] = datos
+    return nueva_memoria
+
+def actualizar_cliente(numero, nuevos_datos):
+    memoria = descargar_memoria_clientes()
+    memoria = limpiar_memoria_vencida(memoria)
+    cliente = memoria.get(numero, {})
+    cliente.update(nuevos_datos)
+    cliente["fecha"] = datetime.now().isoformat()
+    memoria[numero] = cliente
+    subir_memoria_clientes(memoria)
+
+def obtener_datos_cliente(numero):
+    memoria = descargar_memoria_clientes()
+    memoria = limpiar_memoria_vencida(memoria)
+    return memoria.get(numero)
 
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -964,16 +1028,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="👀 Solo necesito el número de referencia, como 261 o 277. Intenta de nuevo."
         )
         return
-    # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
-    if any(palabra in txt for palabra in (
-        "precio", "vale", "cuánto cuesta", "cuánto vale", "cuanto está", "vale cuánto", "vale esto"
-    )):
+ # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
+    palabras_precio = (
+        "precio", "preció", "prezio", "que presio tienen",
+        "valor", "que presio hay", "vale", "valen", "que precio tienen", "vale esto", "valen esto",
+        "costo", "kosto", "cuesto",
+        "cuanto cuesta", "cuanto vale", "cuanto esta", "cuanto es",
+        "cuanto valen", "cuanto cuestan", "cuanto sale", "que precio", "que vale",
+        "kuanto cuesta", "kuanto bale", "cuanttto bale", "k vale", "q cuesta",
+        "q precio", "q vale", "cuanto me sale", "vale cuanto", "cuesta cuanto",
+        "vale algo", "valen algo", "cuanto cobras", "cuanto cobran",
+        "balor", "cuanto baale", "k bale", "vale eso", "cuanto valdra"
+    )
+
+    txt_norm = normalize(txt)  # ⇢ quita tildes / minúsculas
+
+    pregunta_precio = (
+        any(p in txt_norm for p in palabras_precio) or
+        any(difflib.get_close_matches(w, palabras_precio, n=1, cutoff=0.8)
+            for w in txt_norm.split())
+    )
+
+    if pregunta_precio:
         if est.get("modelo") and est.get("color"):
             precio = next(
                 (i["precio"] for i in inv if
-                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
+                 normalize(i["marca"])  == normalize(est.get("marca", "")) and
                  normalize(i["modelo"]) == normalize(est["modelo"]) and
-                 normalize(i["color"]) == normalize(est["color"])),
+                 normalize(i["color"])  == normalize(est["color"])),
                 None
             )
             if precio:
@@ -990,7 +1072,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Para darte el precio necesito saber el modelo y color exacto. ¿Puedes decirme cuál estás mirando?"
+                text="Para darte el precio necesito saber referencia o repetirla. ¿Puedes decirme cuál estás mirando?"
             )
         return
 
@@ -1047,32 +1129,55 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # FAQ 4: ¿Cómo sé que no me van a robar?
+        frases_desconfianza = [
+            "no confío", "no confio", "desconfío", "desconfio",
+            "me han robado", "me robaron", "ya me robaron", "me tumbaron",
+            "me estafaron", "ya me estafaron", "me hicieron el robo",
+            "no quiero pagar antes", "no quiero pagar anticipado",
+            "no quiero dar plata antes", "no quiero enviar dinero sin ver",
+            "me da desconfianza", "me da miedo pagar", "no me da confianza",
+            "me han tumbado", "me hicieron fraude", "tengo miedo de pagar",
+            "no tengo seguridad", "prefiero contraentrega", "quiero pagar al recibir",
+            "pago al recibir", "solo contraentrega", "pago cuando llegue",
+            "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue",
+            "me tumbaron una vez", "me jodieron", "ya me tumbaron",
+            "no vuelvo a caer", "ya me pasó una vez", "eso me pasó antes",
+            "no me sale el mensaje", "no me abre el link", "no salta el mensaje",
+            "me da cosa pagar", "no puedo pagar sin saber", "no mando dinero así",
+            "no conozco su tienda", "no estoy seguro", "como sé que es real",
+            "como sé que es confiable", "como saber si es real", "esto es confiable?",
+            "no tengo pruebas", "es seguro esto?", "no me siento cómodo pagando",
+            "mejor contraentrega", "yo solo pago al recibir", "yo no pago antes",
+            "a mí me han estafado", "me estafaron antes", "me robaron antes",
+            "y si no me llega", "y si no llega", "y si me estafan", "y si es falso",
+            "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
+            "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro",
+            "y si es mentira", "y si es estafa", "y si no me mandan nada",
+            "yo no pago sin ver", "yo no mando plata así", "yo no confío en eso",
+            "esto parece raro", "y si no cumplen", "y si no es verdad",
+            "parece una estafa", "se ve raro", "esto huele a estafa", "muy sospechoso",
+            "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
+        ]
 
-    # ... puedes dejar tus demás FAQs igual que están ...
+        if any(frase in txt for frase in frases_desconfianza):
+            video_url = "https://tudominio.com/videos/video_confianza.mp4"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🤝 Entendemos tu preocupación. "
+                    "Te compartimos este video para que veas que somos una tienda real y seria."
+                ),
+                parse_mode="Markdown"
+            )
+            await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
+            await ctx.bot.send_video(
+                chat_id=cid,
+                video=video_url,
+                caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
+            )
+            return
 
-    # FAQ 4: ¿Cómo sé que no me van a robar?
-    if any(frase in txt for frase in (
-        "no me van a robar", "me van a robar", "es seguro",
-        "como se que es seguro", "no es estafa", "es confiable",
-        "me estafan", "roban por internet", "es real", "desconfío",
-        "no me da confianza", "no confío", "dudas"
-    )):
-        video_url = "https://tudominio.com/videos/video_confianza.mp4"
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🤝 Entendemos tu preocupación. "
-                "Te compartimos este video para que veas que somos una tienda real y seria."
-            ),
-            parse_mode="Markdown"
-        )
-        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-        await ctx.bot.send_video(
-            chat_id=cid,
-            video=video_url,
-            caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
-        )
-        return
 
     # FAQ 5: ¿Dónde están ubicados?
     if any(frase in txt for frase in (
@@ -1283,7 +1388,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
+                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
                     f"👉 Opciones: {', '.join(tallas)}"
                 ),
                 parse_mode="Markdown"
@@ -1341,7 +1446,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
+                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
                     f"👉 Tallas disponibles: {', '.join(tallas)}"
                 ),
                 parse_mode="Markdown"
@@ -1370,12 +1475,67 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         if talla_detectada:
             est["talla"] = talla_detectada
+
+            # 🔍 Ver si ya hay memoria del cliente
+            cliente = obtener_datos_cliente(numero)
+
+            if cliente:
+                nombre = cliente.get("nombre", "cliente")
+                correo = cliente.get("correo", "No registrado")
+                telefono = cliente.get("telefono", numero)
+                cedula = cliente.get("cedula", "No registrada")
+                ciudad = cliente.get("ciudad", "No registrada")
+                provincia = cliente.get("provincia", "No registrada")
+                direccion = cliente.get("direccion", "No registrada")
+
+                est.update({
+                    "nombre": nombre,
+                    "correo": correo,
+                    "telefono": telefono,
+                    "cedula": cedula,
+                    "ciudad": ciudad,
+                    "provincia": provincia,
+                    "direccion": direccion
+                })
+
+                precio = next(
+                    (i["precio"] for i in inv if
+                     normalize(i["marca"]) == normalize(est["marca"]) and
+                     normalize(i["modelo"]) == normalize(est["modelo"]) and
+                     normalize(i["color"]) == normalize(est["color"])),
+                    None
+                )
+
+                est["precio_total"] = int(precio) if precio else 0
+                sale_id = generate_sale_id()
+                est["sale_id"] = sale_id
+
+                resumen = (
+                    f"✅ Pedido: {sale_id}\n"
+                    f"👤Nombre: {nombre}\n"
+                    f"📧Correo: {correo}\n"
+                    f"📱Celular: {telefono}\n"
+                    f"🪪Cédula: {cedula}\n"
+                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
+                )
+
+                est["fase"] = "confirmar_datos_guardados"
+                estado_usuario[cid] = est
+                await ctx.bot.send_message(chat_id=cid, text=resumen)
+                return
+
+            # 🧾 Si no tiene memoria, continuar con flujo normal
             est["fase"] = "esperando_nombre"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿Tu nombre completo? 👤",
+                text="¿Tu nombre completo para el pedido? ",
                 parse_mode="Markdown"
             )
+            return
+
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1383,7 +1543,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
                 reply_markup=menu_botones(tallas),
             )
-        return
+            return
+
 
 
     # ✏️ Nombre del cliente
@@ -1410,7 +1571,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Correo inválido. Intenta de nuevo.",
+                text="⚠️Mandame un correo real porfavor.",
                 parse_mode="Markdown"
             )
         return
@@ -1428,7 +1589,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Teléfono inválido. Intenta de nuevo.",
+                text="Este no parece un telefono real manda el tuyo porfa.",
                 parse_mode="Markdown"
             )
         return
@@ -1446,7 +1607,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Cédula inválida. Intenta de nuevo solo con números.",
+                text="⚠️ Tu cedula real para el pedido porfavor.",
                 parse_mode="Markdown"
             )
         return
@@ -1475,7 +1636,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🏡 Dirección de envío
     if est.get("fase") == "esperando_direccion":
-        est["direccion"] = txt_raw.strip()
+        est["direccion"] = txt_raw.strip()  # ✅ Primero actualizas
+
+        # 💾 Luego guardas todos los datos ya completos
+        actualizar_cliente(numero, {
+            "nombre": est.get("nombre"),
+            "correo": est.get("correo"),
+            "telefono": est.get("telefono"),
+            "cedula": est.get("cedula"),
+            "ciudad": est.get("ciudad"),
+            "provincia": est.get("provincia"),
+            "direccion": est.get("direccion")
+        })
 
         precio = next(
             (
@@ -1528,6 +1700,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         estado_usuario[cid] = est
         return
+
+
 
 
     # 💳 Método de pago
@@ -1762,7 +1936,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{colores[0]}*?\n👉 Tallas disponibles: {', '.join(tallas)}",
+                    text=f"Tenemos las siguientes tallas disponibles para el modelo *{modelo}* color *{colores[0]}*?\n👉 Tallas disponibles: {', '.join(tallas)}",
                     parse_mode="Markdown"
                 )
             else:
@@ -2054,7 +2228,7 @@ async def manejar_precio(update, ctx, inventario):
             text=(
                 f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
                 f"{respuesta_final}"
-                "¿Te gustaría proseguir con la compra?\n\n"
+                "Seguimos con la compra?\n\n"
             ),
             parse_mode="Markdown"
         )
