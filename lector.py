@@ -127,35 +127,44 @@ def obtener_datos_cliente(numero):
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 🔊 Función para generar audio con OpenAI TTS
+# 🔊 Función para generar audio con OpenAI TTS (con logs completos)
 async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
     try:
+        logging.debug("🔧 Iniciando función generar_audio_openai()...")
+        logging.debug(f"📥 Texto recibido: {texto}")
+        logging.debug(f"📦 Nombre del archivo: {nombre_archivo}")
+
         # Crear carpeta si no existe
         os.makedirs("temp", exist_ok=True)
         logging.debug("📁 Carpeta 'temp' verificada/creada")
+
+        # Ruta completa del archivo
+        ruta = os.path.join("temp", nombre_archivo)
+        logging.debug(f"🧾 Ruta final esperada del audio: {ruta}")
 
         # Generar audio con OpenAI TTS
         logging.debug("🧠 Enviando solicitud a OpenAI TTS...")
         response = await client.audio.speech.create(
             model="tts-1",
-            voice="nova",  # Opciones: alloy, shimmer, echo, etc.
+            voice="nova",  # Puedes usar alloy, shimmer, echo, etc.
             input=texto
         )
 
-        # Guardar archivo local
-        with open(nombre_archivo, "wb") as f:
-            audio_data = await response.read()
+        # Leer el audio generado
+        audio_data = await response.read()
+        logging.debug(f"📦 Tamaño del audio recibido: {len(audio_data)} bytes")
+
+        # Guardar archivo localmente
+        with open(ruta, "wb") as f:
             f.write(audio_data)
-        logging.info(f"✅ Audio generado correctamente: {nombre_archivo}")
-        return nombre_archivo
+        logging.info(f"✅ Audio generado y guardado correctamente: {ruta}")
+
+        return ruta
 
     except Exception as e:
-        logging.error(f"❌ Error generando audio: {e}")
+        logging.error(f"❌ Error generando audio con OpenAI TTS: {e}")
         return None
 
-
-
-logging.basicConfig(level=logging.DEBUG)
 
 # CLIP: cargar modelo una sola vez
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
