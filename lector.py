@@ -2310,6 +2310,20 @@ async def responder_con_openai(mensaje_usuario):
     except Exception as e:
         logging.error(f"Error al consultar OpenAI: {e}")
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
+# 🧭 Manejo del catálogo si el usuario lo menciona
+async def manejar_catalogo(update, ctx):
+    cid = update.get("from")
+    txt = update.get("body", "").lower()
+
+    if menciona_catalogo(txt):
+        mensaje = (
+            "🛍️ ¡Claro! Aquí tienes el catálogo más reciente:\n"
+            "👉 https://wa.me/c/573007607245\n"
+            "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
+        )
+        await ctx.bot.send_message(chat_id=cid, text=mensaje)
+        return True
+    return False
 
 # ─────────────────────────────────────────────────────────────
 # 4. Procesar mensaje de WhatsApp
@@ -2388,13 +2402,34 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "háblame", "hábleme", "háblame por voz", "me puedes hablar",
         "leeme", "léeme", "no sé leer", "no se leer", "no puedo leer"
     )):
-        texto_respuesta = ("Hola 👋 soy tu asistente. "
-                           "Cuéntame qué modelo deseas adquirir hoy.")
-        ruta_audio = await generar_audio_openai(texto_respuesta, f"temp/audio_{cid}.mp3")
-        if ruta_audio and os.path.exists(ruta_audio):
-            ctx.resp.append({"type": "audio", "path": ruta_audio, "text": "🎧 Aquí tienes tu audio:"})
-        else:
-            ctx.resp.append("❌ No pude generar el audio en este momento.")
+        texto_respuesta = (
+            "Hola 👋 soy tu asistente. "
+            "Cuéntame qué modelo deseas adquirir hoy."
+        )
+
+        try:
+            ruta_audio = await generar_audio_openai(texto_respuesta, f"audio_{cid}.mp3")
+            ruta_completa = os.path.join("temp", f"audio_{cid}.mp3")
+
+            if ruta_audio and os.path.exists(ruta_completa):
+                return {
+                    "type": "audio",
+                    "path": ruta_completa,
+                    "text": "🎧 Aquí tienes tu audio:"
+                }
+            else:
+                return {
+                    "type": "text",
+                    "text": "❌ No pude generar el audio en este momento."
+                }
+
+        except Exception as e:
+            logging.error(f"❌ Error generando o accediendo al audio: {e}")
+            return {
+                "type": "text",
+                "text": "❌ Ocurrió un problema generando el audio."
+            }
+
 
     # ─── MAIN try/except ───
     try:
