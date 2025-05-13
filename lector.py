@@ -127,43 +127,52 @@ def obtener_datos_cliente(numero):
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 🔊 Función para generar audio con OpenAI TTS (con logs completos)
-async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
-    try:
-        logging.debug("🔧 Iniciando función generar_audio_openai()...")
-        logging.debug(f"📥 Texto recibido: {texto}")
-        logging.debug(f"📦 Nombre del archivo: {nombre_archivo}")
 
-        # Crear carpeta si no existe
+
+# ─────────────────────────────────────────────────────────────
+#  🔊 FUNCIÓN PARA GENERAR AUDIO TTS – CON LOGS DETALLADOS
+# ─────────────────────────────────────────────────────────────
+async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
+    """
+    Genera audio con OpenAI TTS y lo guarda en temp/<nombre_archivo>.
+    Devuelve la ruta completa del archivo o None si falla.
+    """
+    try:
+        logging.debug("🔧 Iniciando generar_audio_openai()")
+        logging.debug(f"📥 Texto recibido: {texto!r}")
+        logging.debug(f"📦 Nombre de archivo solicitado: {nombre_archivo}")
+
+        # 1) Asegurar carpeta temp/
         os.makedirs("temp", exist_ok=True)
         logging.debug("📁 Carpeta 'temp' verificada/creada")
 
-        # Ruta completa del archivo
+        # 2) Ruta final donde se guardará el audio
         ruta = os.path.join("temp", nombre_archivo)
-        logging.debug(f"🧾 Ruta final esperada del audio: {ruta}")
+        logging.debug(f"🧾 Ruta final esperada: {ruta}")
 
-        # Generar audio con OpenAI TTS
-        logging.debug("🧠 Enviando solicitud a OpenAI TTS...")
+        # 3) Solicitud a OpenAI TTS
+        logging.debug("🧠 Enviando solicitud TTS a OpenAI…")
         response = await client.audio.speech.create(
             model="tts-1",
-            voice="nova",  # Puedes usar alloy, shimmer, echo, etc.
+            voice="nova",       # Cambia a alloy, shimmer, etc. si lo deseas
             input=texto
         )
 
-        # Leer el audio generado
+        # 4) Leer el binario devuelto
         audio_data = await response.read()
-        logging.debug(f"📦 Tamaño del audio recibido: {len(audio_data)} bytes")
+        logging.debug(f"📦 Bytes recibidos: {len(audio_data)}")
 
-        # Guardar archivo localmente
+        # 5) Guardar el archivo en disco
         with open(ruta, "wb") as f:
             f.write(audio_data)
-        logging.info(f"✅ Audio generado y guardado correctamente: {ruta}")
+        logging.info(f"✅ Audio generado y guardado: {ruta}")
 
         return ruta
 
     except Exception as e:
         logging.error(f"❌ Error generando audio con OpenAI TTS: {e}")
         return None
+
 
 
 # CLIP: cargar modelo una sola vez
