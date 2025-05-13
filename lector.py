@@ -2312,8 +2312,8 @@ async def responder_con_openai(mensaje_usuario):
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
 # 🧭 Manejo del catálogo si el usuario lo menciona
 async def manejar_catalogo(update, ctx):
-    cid = update.get("from")
-    txt = update.get("body", "").lower()
+    cid = getattr(update, "from", None) or getattr(update.effective_chat, "id", "")
+    txt = getattr(update.message, "text", "").lower()
 
     if menciona_catalogo(txt):
         mensaje = (
@@ -2324,6 +2324,7 @@ async def manejar_catalogo(update, ctx):
         await ctx.bot.send_message(chat_id=cid, text=mensaje)
         return True
     return False
+
 
 # ─────────────────────────────────────────────────────────────
 # 4. Procesar mensaje de WhatsApp
