@@ -1,20 +1,29 @@
+# ─── WhatsApp / Telegram / Web ───
 python-telegram-bot[webhooks]
 fastapi
 uvicorn
+aiohttp
 nest_asyncio
-python-dotenv==1.0.1
-requests
-gdown
+
+# ─── Google / Sheets / Vision ───
+gspread>=6.0.0
+google-auth>=2.0.0
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+google-cloud-vision
+
+# ─── OpenAI / IA ───
+openai>=1.14.0
+transformers
+torch==2.1.0
+torchvision==0.16.0
+
+# ─── Utilidades ───
+python-dotenv==1.0.1
+requests
+gdown
 pydub
 ffmpeg-python
 pillow
 numpy==1.26.4
-openai>=1.14.0
-google-cloud-vision
-aiohttp
-transformers
-torch==2.1.0
-torchvision==0.16.0
