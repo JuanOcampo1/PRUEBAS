@@ -746,44 +746,6 @@ async def transcribe_audio(file_path: str) -> str | None:
         logging.error(f"❌ Whisper error: {e}")
     return None
 
-# ───────────────────────────────────────────────────────────────
-
-# 🔥 Enviar video de referencia desde disco persistente
-async def envvideo_referencia(cid, ctx, referencia):
-    try:
-        referencias_soportadas = ["261", "277", "303", "295", "299", "ds 261", "ds 277", "ds 303", "ds 295", "ds 299"]
-        ref = normalize(referencia.lower())
-
-        if ref in referencias_soportadas:
-            ruta_video = "/var/data/videos/videosreferencias_top.MP4"
-            if os.path.exists(ruta_video):
-                with open(ruta_video, "rb") as video:
-                    await ctx.bot.send_video(
-                        chat_id=cid,
-                        video=video,
-                        caption=(
-                            f"🎬 Video de referencia {referencia.upper()}.\n"
-                            "¿Deseas continuar tu compra? (SI/NO)"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                return True
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="😕 Por ahora solo tengo un video para las referencias DS 261, 277, 303, 295 y 299.",
-            parse_mode="Markdown"
-        )
-        return True
-
-    except Exception as e:
-        logging.error(f"[Video] ❌ Error: {e}")
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="⚠️ Hubo un error enviando el video. Intenta de nuevo."
-        )
-        return True
-
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1081,6 +1043,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
         return
 
+
 async def enviar_video_referencia(cid, ctx, referencia):
     opciones = {
         "261": "referencias.mp4",
@@ -1102,14 +1065,27 @@ async def enviar_video_referencia(cid, ctx, referencia):
     nombre_archivo = opciones.get(ref)
 
     if not nombre_archivo:
-        await ctx.bot.send_message(chat_id=cid, text="❌ No reconocí ese video. Intenta con el número o nombre correcto.")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
+        )
         return
 
     ruta_video = os.path.join("/var/data/videos", nombre_archivo)
     if os.path.exists(ruta_video):
-        await ctx.bot.send_video(chat_id=cid, video=open(ruta_video, "rb"))
+        with open(ruta_video, "rb") as video:
+            await ctx.bot.send_video(
+                chat_id=cid,
+                video=video,
+                caption="🎬 Aquí tienes el video solicitado 👇",
+                parse_mode="Markdown"
+            )
     else:
-        await ctx.bot.send_message(chat_id=cid, text="⚠️ El video aún no está disponible. Estoy actualizando mi galería.")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
+        )
+
 
  # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
     palabras_precio = (
