@@ -29,6 +29,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 import gspread
+from google.oauth2 import service_account     # ← alias de antes
 
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
@@ -53,6 +54,42 @@ from telegram.ext import (
     filters,
 )
 
+CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"  # ID de tu carpeta en Google Drive
+
+def descargar_videos_drive():
+    try:
+        service = get_drive_service()
+        os.makedirs("/var/data/videos", exist_ok=True)
+
+        resultados = service.files().list(
+            q=f"'{CARPETA_VIDEOS_DRIVE}' in parents and mimeType='video/mp4'",
+            fields="files(id, name)"
+        ).execute()
+
+        for archivo in resultados.get("files", []):
+            nombre = archivo["name"]
+            id_video = archivo["id"]
+            ruta_destino = os.path.join("/var/data/videos", nombre)
+
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre}")
+                continue
+
+            logging.info(f"⬇️ Descargando {nombre} desde Drive")
+            request = service.files().get_media(fileId=id_video)
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
+
+        logging.info("✅ Descarga de videos completada.")
+    except Exception as e:
+        logging.error(f"❌ Error descargando videos desde Drive: {e}")
 # 🧠 Anti-duplicados por mensaje ID
 ultimo_msg = {}
 
@@ -126,8 +163,6 @@ def obtener_datos_cliente(numero):
     memoria = descargar_memoria_clientes()
     memoria = limpiar_memoria_vencida(memoria)
     return memoria.get(numero)
-
-from openai import AsyncOpenAI
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -713,14 +748,14 @@ async def transcribe_audio(file_path: str) -> str | None:
 
 # ───────────────────────────────────────────────────────────────
 
-# 🔥 Enviar video de referencia (un solo archivo para varias referencias)
-async def enviar_video_referencia(cid, ctx, referencia):
+# 🔥 Enviar video de referencia desde disco persistente
+async def envvideo_referencia(cid, ctx, referencia):
     try:
         referencias_soportadas = ["261", "277", "303", "295", "299", "ds 261", "ds 277", "ds 303", "ds 295", "ds 299"]
         ref = normalize(referencia.lower())
 
         if ref in referencias_soportadas:
-            ruta_video = "videosreferencias_top.MP4"  # Asegúrate que esté al mismo nivel del archivo .py
+            ruta_video = "/var/data/videos/videosreferencias_top.MP4"
             if os.path.exists(ruta_video):
                 with open(ruta_video, "rb") as video:
                     await ctx.bot.send_video(
@@ -732,13 +767,14 @@ async def enviar_video_referencia(cid, ctx, referencia):
                         ),
                         parse_mode="Markdown"
                     )
-                return
+                return True
 
         await ctx.bot.send_message(
             chat_id=cid,
             text="😕 Por ahora solo tengo un video para las referencias DS 261, 277, 303, 295 y 299.",
             parse_mode="Markdown"
         )
+        return True
 
     except Exception as e:
         logging.error(f"[Video] ❌ Error: {e}")
@@ -746,6 +782,8 @@ async def enviar_video_referencia(cid, ctx, referencia):
             chat_id=cid,
             text="⚠️ Hubo un error enviando el video. Intenta de nuevo."
         )
+        return True
+
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1016,38 +1054,63 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
-    # 🎬 Si pide videos normales
+    # 🎬 Si el cliente pide ver videos
     if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
                 "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                "• DS 261🔥 277🔥 303🔥 295🔥 299\n"
-                "• PROMO 39%🔥\n"
-                "• Referencias niño🔥\n\n"
-                "¿Cuál te gustaría ver?"
+                "• *DS 261* 🔥\n"
+                "• *DS 277* 🔥\n"
+                "• *DS 303* 🔥\n"
+                "• *REFERENCIAS NIÑO* 👶\n"
+                "• *PROMO DESCUENTOS* 💸\n\n"
+                "Escríbeme el número o el nombre del video que deseas ver."
             ),
-            reply_markup=menu_botones(["DS 277", "DS 261", "DS 303"]),
             parse_mode="Markdown"
         )
         est["fase"] = "esperando_video_referencia"
         estado_usuario[cid] = est
         return
 
-    # 🎬 Esperar selección de video
+    # 🎬 Procesar selección de video
     if est.get("fase") == "esperando_video_referencia":
-        # Ignora coincidencia con modelo tipo 261
-        if re.match(r"^\d{3}$", txt_raw.strip()):
-            await enviar_video_referencia(cid, ctx, txt)
-            est["fase"] = "inicio"
-            estado_usuario[cid] = est
-            return
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="👀 Solo necesito el número de referencia, como 261 o 277. Intenta de nuevo."
-        )
+        ref = normalize(txt_raw)
+        await enviar_video_referencia(cid, ctx, ref)
+        est["fase"] = "inicio"
+        estado_usuario[cid] = est
         return
+
+async def enviar_video_referencia(cid, ctx, referencia):
+    opciones = {
+        "261": "referencias.mp4",
+        "ds 261": "referencias.mp4",
+        "277": "referencias2.mp4",
+        "ds 277": "referencias2.mp4",
+        "303": "referencias2.mp4",
+        "ds 303": "referencias2.mp4",
+        "niño": "infantil.mp4",
+        "niños": "infantil.mp4",
+        "infantil": "infantil.mp4",
+        "kids": "infantil.mp4",
+        "promo": "descuentos.mp4",
+        "descuento": "descuentos.mp4",
+        "descuentos": "descuentos.mp4"
+    }
+
+    ref = normalize(referencia)
+    nombre_archivo = opciones.get(ref)
+
+    if not nombre_archivo:
+        await ctx.bot.send_message(chat_id=cid, text="❌ No reconocí ese video. Intenta con el número o nombre correcto.")
+        return
+
+    ruta_video = os.path.join("/var/data/videos", nombre_archivo)
+    if os.path.exists(ruta_video):
+        await ctx.bot.send_video(chat_id=cid, video=open(ruta_video, "rb"))
+    else:
+        await ctx.bot.send_message(chat_id=cid, text="⚠️ El video aún no está disponible. Estoy actualizando mi galería.")
+
  # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
     palabras_precio = (
         "precio", "preció", "prezio", "que presio tienen",
@@ -2731,6 +2794,7 @@ async def venom_webhook(req: Request):
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
+    descargar_videos_drive()  # ⬅️ Descarga videos desde Drive al iniciar
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
