@@ -11,13 +11,14 @@ import requests
 import asyncio
 import difflib
 import unicodedata
+import subprocess
+import time
 from datetime import datetime, timedelta
 from collections import defaultdict
 from types import SimpleNamespace
-import subprocess
-import time
+
 # ——— Librerías externas ———
-import numpy as np
+import numpy as np               # ←  déjalo si realmente lo usas
 import torch
 import nest_asyncio
 from PIL import Image
@@ -27,10 +28,11 @@ from torchvision import transforms
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
+import gspread
 
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
-from google.oauth2 import service_account
+from google.oauth2.service_account import Credentials   # forma única
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
@@ -50,6 +52,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
 # 🧠 Anti-duplicados por mensaje ID
 ultimo_msg = {}
 
@@ -124,54 +127,44 @@ def obtener_datos_cliente(numero):
     memoria = limpiar_memoria_vencida(memoria)
     return memoria.get(numero)
 
+from openai import AsyncOpenAI
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-
-# ─────────────────────────────────────────────────────────────
-#  🔊 FUNCIÓN PARA GENERAR AUDIO TTS – CON LOGS DETALLADOS
-# ─────────────────────────────────────────────────────────────
-async def generar_audio_openai(texto: str, nombre_archivo: str = "respuesta.mp3"):
-    """
-    Genera audio con OpenAI TTS y lo guarda en temp/<nombre_archivo>.
-    Devuelve la ruta completa del archivo o None si falla.
-    """
+async def generar_audio_openai(texto: str,
+                               nombre_archivo: str = "respuesta.mp3",
+                               voice: str = "nova") -> str | None:
     try:
-        logging.debug("🔧 Iniciando generar_audio_openai()")
-        logging.debug(f"📥 Texto recibido: {texto!r}")
-        logging.debug(f"📦 Nombre de archivo solicitado: {nombre_archivo}")
-
-        # 1) Asegurar carpeta temp/
+        logging.debug("🔧 generar_audio_openai() inicia…")
         os.makedirs("temp", exist_ok=True)
-        logging.debug("📁 Carpeta 'temp' verificada/creada")
-
-        # 2) Ruta final donde se guardará el audio
         ruta = os.path.join("temp", nombre_archivo)
-        logging.debug(f"🧾 Ruta final esperada: {ruta}")
 
-        # 3) Solicitud a OpenAI TTS
-        logging.debug("🧠 Enviando solicitud TTS a OpenAI…")
-        response = await client.audio.speech.create(
+        # 1️⃣  Solicitud TTS
+        resp = await client.audio.speech.create(
             model="tts-1",
-            voice="nova",       # Cambia a alloy, shimmer, etc. si lo deseas
+            voice=voice,
             input=texto
         )
 
-        # 4) Leer el binario devuelto
-        audio_data = await response.read()
-        logging.debug(f"📦 Bytes recibidos: {len(audio_data)}")
+        # 2️⃣  Obtener los bytes según el método disponible
+        if hasattr(resp, "aread"):                       # SDK async v1
+            audio_bytes = await resp.aread()
+        elif callable(getattr(resp, "read", None)):      # SDK sync v1 (pero obj devuelto aquí)
+            audio_bytes = resp.read()
+        else:                                            # Fallback
+            audio_bytes = resp  # asume bytes directos
 
-        # 5) Guardar el archivo en disco
+        # 3️⃣  Guardar
         with open(ruta, "wb") as f:
-            f.write(audio_data)
-        logging.info(f"✅ Audio generado y guardado: {ruta}")
+            f.write(audio_bytes)
 
+        logging.info(f"✅ Audio guardado: {ruta}")
         return ruta
 
     except Exception as e:
-        logging.error(f"❌ Error generando audio con OpenAI TTS: {e}")
+        logging.error(f"❌ Error generando audio: {e}")
         return None
+
 
 
 
