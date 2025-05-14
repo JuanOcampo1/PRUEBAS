@@ -979,6 +979,50 @@ def generate_sale_id() -> str:
     return f"VEN-{ts}-{rnd}"
 
 
+# ─────────────────────────────────────────
+# FUNCIÓN AUXILIAR – ENVIAR VIDEO
+# ─────────────────────────────────────────
+async def enviar_video_referencia(cid, ctx, referencia):
+    opciones = {
+        "261": "referencias.mp4",
+        "ds 261": "referencias.mp4",
+        "277": "referencias2.mp4",
+        "ds 277": "referencias2.mp4",
+        "303": "referencias2.mp4",
+        "ds 303": "referencias2.mp4",
+        "niño": "infantil.mp4",
+        "niños": "infantil.mp4",
+        "infantil": "infantil.mp4",
+        "kids": "infantil.mp4",
+        "promo": "descuentos.mp4",
+        "descuento": "descuentos.mp4",
+        "descuentos": "descuentos.mp4"
+    }
+
+    ref = normalize(referencia)
+    nombre_archivo = opciones.get(ref)
+
+    if not nombre_archivo:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
+        )
+        return
+
+    ruta_video = os.path.join("/var/data/videos", nombre_archivo)
+    if os.path.exists(ruta_video):
+        with open(ruta_video, "rb") as video:
+            await ctx.bot.send_video(
+                chat_id=cid,
+                video=video,
+                caption="🎬 Aquí tienes el video solicitado 👇",
+                parse_mode="Markdown"
+            )
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
+        )
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1031,6 +1075,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
+
     # 🎬 Si el cliente pide ver videos
     if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
         await ctx.bot.send_message(
@@ -1058,60 +1103,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
         return
 
-
-# ─────────────────────────────────────────
-# FUNCIÓN AUXILIAR – ENVIAR VIDEO
-# ─────────────────────────────────────────
-async def enviar_video_referencia(cid, ctx, referencia):
-    opciones = {
-        "261": "referencias.mp4",
-        "ds 261": "referencias.mp4",
-        "277": "referencias2.mp4",
-        "ds 277": "referencias2.mp4",
-        "303": "referencias2.mp4",
-        "ds 303": "referencias2.mp4",
-        "niño": "infantil.mp4",
-        "niños": "infantil.mp4",
-        "infantil": "infantil.mp4",
-        "kids": "infantil.mp4",
-        "promo": "descuentos.mp4",
-        "descuento": "descuentos.mp4",
-        "descuentos": "descuentos.mp4"
-    }
-
-    ref = normalize(referencia)
-    nombre_archivo = opciones.get(ref)
-
-    if not nombre_archivo:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
-        )
-        return
-
-    ruta_video = os.path.join("/var/data/videos", nombre_archivo)
-    if os.path.exists(ruta_video):
-        with open(ruta_video, "rb") as video:
-            await ctx.bot.send_video(
-                chat_id=cid,
-                video=video,
-                caption="🎬 Aquí tienes el video solicitado 👇",
-                parse_mode="Markdown"
-            )
-    else:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
-        )
-
-# ─────────────────────────────────────────
-# DENTRO DE responder()  ➜  después del bloque de video
-# (misma indentación que los demás `if`)
-# ─────────────────────────────────────────
     # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
     palabras_precio = (
         "precio", "preció", "prezio", "que presio tienen",
-        "valor",  "que presio hay", "vale", "valen", "que precio tienen",
+        "valor", "que presio hay", "vale", "valen", "que precio tienen",
         "vale esto", "valen esto", "costo", "kosto", "cuesto",
         "cuanto cuesta", "cuanto vale", "cuanto esta", "cuanto es",
         "cuanto valen", "cuanto cuestan", "cuanto sale", "que precio", "que vale",
@@ -1121,11 +1116,11 @@ async def enviar_video_referencia(cid, ctx, referencia):
         "balor", "cuanto baale", "k bale", "vale eso", "cuanto valdra"
     )
 
-    txt_norm = normalize(txt)  # ⇢ minúsculas y sin tildes
+    txt_norm = normalize(txt)
 
     pregunta_precio = (
         any(p in txt_norm for p in palabras_precio) or
-        any(difflib.get_close_matches(w, palabras_precizo, n=1, cutoff=0.8)
+        any(difflib.get_close_matches(w, palabras_precio, n=1, cutoff=0.8)
             for w in txt_norm.split())
     )
 
