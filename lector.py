@@ -1332,26 +1332,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 5: ¿Dónde están ubicados?
-        if est.get("fase") not in ("editando_dato", "esperando_direccion"):
-            if any(frase in txt for frase in (
-                "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-                "direccion", "dirección", "donde estan", "donde es la tienda",
-                "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
-            )):
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                        "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                        "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                        "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                    ),
-                    parse_mode="Markdown"
-                )
-                await reanudar_fase_actual(cid, ctx, est)
-                return
-
+    # FAQ 5: ¿Dónde están ubicados?
+    if est.get("fase") not in ("editando_dato", "esperando_direccion", "confirmar_datos_guardados"):
+        if any(frase in txt for frase in (
+            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
+            "direccion", "dirección", "donde estan", "donde es la tienda",
+            "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                ),
+                parse_mode="Markdown"
+            )
+            await reanudar_fase_actual(cid, ctx, est)
+            return
 
         # FAQ 6: ¿Son nacionales o importados?
         if any(frase in txt for frase in (
@@ -2594,9 +2593,9 @@ async def manejar_catalogo(update, ctx):
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid = str(cid)                                   # 🔐 ID siempre string
+    cid = str(cid)  # 🔐 ID siempre string
     texto = body.lower() if body else ""
-    txt   = texto if texto else ""
+    txt = texto if texto else ""
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -2605,7 +2604,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ─── FILTRO 2: anti‑duplicados (<30 s) ───
     DEDUP_WINDOW = 30
-    now  = time.time()
+    now = time.time()
     info = ultimo_msg.get(cid)
     if info and msg_id and msg_id == info["id"] and now - info["t"] < DEDUP_WINDOW:
         print(f"[IGNORADO] Duplicado reciente de {cid}")
@@ -2622,25 +2621,26 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     ctx = DummyCtx(resp=[])
 
     ctx.bot = SimpleNamespace(
-        send_message     = ctx.bot_send,
-        send_chat_action = ctx.bot_send_chat_action,
-        send_video       = ctx.bot_send_video
+        send_message=ctx.bot_send,
+        send_chat_action=ctx.bot_send_chat_action,
+        send_video=ctx.bot_send_video
     )
 
     class DummyMsg(SimpleNamespace):
         def __init__(self, text, ctx, photo=None, voice=None, audio=None):
-            self.text  = text
+            self.text = text
             self.photo = photo
             self.voice = voice
             self.audio = audio
-            self._ctx  = ctx
+            self._ctx = ctx
+
         async def reply_text(self, text, **kw):
             self._ctx.resp.append(text)
 
     dummy_msg = DummyMsg(text=body, ctx=ctx)
     dummy_update = SimpleNamespace(
-        message        = dummy_msg,
-        effective_chat = SimpleNamespace(id=cid)
+        message=dummy_msg,
+        effective_chat=SimpleNamespace(id=cid)
     )
 
     # 🧠 Inicializa estado si no existe
@@ -2695,19 +2695,24 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "text": "❌ Ocurrió un problema generando el audio."
             }
 
-
     # ─── MAIN try/except ───
     try:
-        await responder(dummy_update, ctx)
+        reply = await responder(dummy_update, ctx)
 
+        # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
+        if isinstance(reply, dict):
+            return reply
+
+        # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
             return {"type": "text", "text": "\n".join(ctx.resp)}
 
+        # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
         if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
-            return {"type": "text",
-                    "text": "💬 Espero tu método de pago o comprobante. 📸"}
+            return {"type": "text", "text": "💬 Espero tu método de pago o comprobante. 📸"}
 
+        # 🔁 Caso final: pasar a la IA
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia or "🤖 Estoy revisando el sistema…"}
 
@@ -2715,12 +2720,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         print(f"🔥 Error interno en procesar_wa(): {e}")
         try:
             respuesta_ia = await responder_con_openai(body)
-            return {"type": "text",
-                    "text": respuesta_ia or "⚠️ Hubo un error inesperado. Intenta de nuevo."}
+            return {"type": "text", "text": respuesta_ia or "⚠️ Hubo un error inesperado. Intenta de nuevo."}
         except Exception as fallback_error:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
-            return {"type": "text",
-                    "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
+            return {"type": "text", "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
 
 
 @api.post("/venom")
