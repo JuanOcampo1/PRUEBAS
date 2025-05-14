@@ -1017,9 +1017,12 @@ def generate_sale_id() -> str:
 
 
 # ─────────────────────────────────────────
-# FUNCIÓN AUXILIAR – ENVIAR VIDEO
+# FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM)
 # ─────────────────────────────────────────
+import base64
+
 async def enviar_video_referencia(cid, ctx, referencia):
+    # Mapa lógico: lo que el usuario puede escribir
     opciones = {
         "261": "referencias.mp4",
         "ds 261": "referencias.mp4",
@@ -1036,30 +1039,54 @@ async def enviar_video_referencia(cid, ctx, referencia):
         "descuentos": "descuentos.mp4"
     }
 
-    ref = normalize(referencia)
-    nombre_archivo = opciones.get(ref)
+    # Mapa real: nombres exactos que quedaron en disco (con mayúsculas)
+    nombres_real = {
+        "referencias.mp4":  "Referencias.mp4",
+        "referencias2.mp4": "Referencias2.mp4",
+        "infantil.mp4":     "Infantil.mp4",
+        "descuentos.mp4":   "Descuentos.mp4"
+    }
 
-    if not nombre_archivo:
+    ref = normalize(referencia).lower()
+    nombre_logico = opciones.get(ref)
+    nombre_real   = nombres_real.get(nombre_logico)
+
+    if not nombre_real:
         await ctx.bot.send_message(
             chat_id=cid,
             text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
         )
         return
 
-    ruta_video = os.path.join("/var/data/videos", nombre_archivo)
-    if os.path.exists(ruta_video):
-        with open(ruta_video, "rb") as video:
-            await ctx.bot.send_video(
-                chat_id=cid,
-                video=video,
-                caption="🎬 Aquí tienes el video solicitado 👇",
-                parse_mode="Markdown"
-            )
-    else:
+    ruta_video = os.path.join("/var/data/videos", nombre_real)
+    if not os.path.exists(ruta_video):
         await ctx.bot.send_message(
             chat_id=cid,
             text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
         )
+        return
+
+    try:
+        # Codificar video a base64 para que Venom lo pueda enviar
+        with open(ruta_video, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        # Devolvemos el dict que lee tu webhook /venom
+        return {
+            "type": "video",
+            "base64": b64,
+            "mimetype": "video/mp4",
+            "filename": nombre_real,
+            "text": "🎬 Aquí tienes el video solicitado 👇"
+        }
+
+    except Exception as e:
+        logging.error(f"❌ Error al enviar video: {e}")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="❌ No logré enviarte el video. Intenta de nuevo."
+        )
+
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1192,10 +1219,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# ─────────── Preguntas frecuentes (FAQ) ───────────
+    # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
-        # FAQ 1: ¿Cuánto demora el envío?
+        # FAQ 1: ¿Cuánto demora el envío?
         if any(frase in txt for frase in (
             "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
             "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
@@ -1211,9 +1238,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
+            await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 2: ¿Tienen pago contra entrega?
+        # FAQ 2: ¿Tienen pago contra entrega?
         if any(frase in txt for frase in (
             "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
             "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
@@ -1222,14 +1250,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 chat_id=cid,
                 text=(
                     "📦 ¡Claro que sí! Tenemos *pago contra entrega*.\n\n"
-                    "Pedimos un *anticipo de $35 000* que cubre el envío. "
+                    "Pedimos un *anticipo de $35 000* que cubre el envío. "
                     "Ese valor se descuenta del precio total cuando recibes el pedido."
                 ),
                 parse_mode="Markdown"
             )
+            await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 3: ¿Tienen garantía?
+        # FAQ 3: ¿Tienen garantía?
         if any(frase in txt for frase in (
             "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
             "garantía", "garantia", "tienen garantia de fabrica"
@@ -1243,9 +1272,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
+            await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 4: ¿Cómo sé que no me van a robar?
+        # FAQ 4: ¿Cómo sé que no me van a robar?
         frases_desconfianza = [
             "no confío", "no confio", "desconfío", "desconfio",
             "me han robado", "me robaron", "ya me robaron", "me tumbaron",
@@ -1292,42 +1322,45 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 video=video_url,
                 caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
             )
+            await reanudar_fase_actual(cid, ctx, est)
             return
 
+        # FAQ 5: ¿Dónde están ubicados?
+        if any(frase in txt for frase in (
+            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
+            "direccion", "dirección", "donde estan", "donde es la tienda",
+            "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                ),
+                parse_mode="Markdown"
+            )
+            await reanudar_fase_actual(cid, ctx, est)
+            return
 
-    # FAQ 5: ¿Dónde están ubicados?
-    if any(frase in txt for frase in (
-        "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-        "direccion", "dirección", "donde estan", "donde es la tienda",
-        "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-            ),
-            parse_mode="Markdown"
-        )
-        return
+        # FAQ 6: ¿Son nacionales o importados?
+        if any(frase in txt for frase in (
+            "son nacionales", "son importados", "es nacional o importado",
+            "nacionales o importados", "hecho en colombia", "fabricados en colombia",
+            "son de aqui", "es de colombia", "fabricacion colombiana"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
+                    "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
+                ),
+                parse_mode="Markdown"
+            )
+            await reanudar_fase_actual(cid, ctx, est)
+            return
 
-    # FAQ 6: ¿Son nacionales o importados?
-    if any(frase in txt for frase in (
-        "son nacionales", "son importados", "es nacional o importado",
-        "nacionales o importados", "hecho en colombia", "fabricados en colombia",
-        "son de aqui", "es de colombia", "fabricacion colombiana"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
-                "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
-            ),
-            parse_mode="Markdown"
-        )
-        return
 
     # FAQ 7: ¿Son originales?
     if any(frase in txt for frase in (
@@ -1339,6 +1372,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana reconocida por su calidad y diseño.",
             parse_mode="Markdown"
         )
+        await reanudar_fase_actual(cid, ctx, est)
         return
 
     # FAQ 8: ¿De qué calidad son?
@@ -1355,6 +1389,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="Markdown"
         )
+        await reanudar_fase_actual(cid, ctx, est)
         return
 
     # FAQ 9: ¿Hay descuento si compro 2 pares?
@@ -1371,6 +1406,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="Markdown"
         )
+        await reanudar_fase_actual(cid, ctx, est)
         return
 
     # FAQ 10: ¿Manejan precios para mayoristas?
@@ -1388,6 +1424,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="Markdown"
         )
+        await reanudar_fase_actual(cid, ctx, est)
         return
 
     # FAQ 11: ¿Las tallas son normales o grandes?
@@ -1404,6 +1441,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="Markdown"
         )
+        await reanudar_fase_actual(cid, ctx, est)
         return
 
     # FAQ 12: ¿Cuál es la talla más grande que manejan?
@@ -1421,7 +1459,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="Markdown"
         )
+        await reanudar_fase_actual(cid, ctx, est)
         return
+
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
@@ -1592,74 +1632,152 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if talla_detectada:
             est["talla"] = talla_detectada
 
-            # 🔍 Ver si ya hay memoria del cliente
-            cliente = obtener_datos_cliente(numero)
+        # 🔍 Ver si ya hay memoria del cliente
+        cliente = obtener_datos_cliente(numero)
 
-            if cliente:
-                nombre = cliente.get("nombre", "cliente")
-                correo = cliente.get("correo", "No registrado")
-                telefono = cliente.get("telefono", numero)
-                cedula = cliente.get("cedula", "No registrada")
-                ciudad = cliente.get("ciudad", "No registrada")
-                provincia = cliente.get("provincia", "No registrada")
-                direccion = cliente.get("direccion", "No registrada")
+        if cliente:
+            nombre     = cliente.get("nombre", "cliente")
+            correo     = cliente.get("correo", "No registrado")
+            telefono   = cliente.get("telefono", numero)
+            cedula     = cliente.get("cedula", "No registrada")
+            ciudad     = cliente.get("ciudad", "No registrada")
+            provincia  = cliente.get("provincia", "No registrada")
+            direccion  = cliente.get("direccion", "No registrada")
 
-                est.update({
-                    "nombre": nombre,
-                    "correo": correo,
-                    "telefono": telefono,
-                    "cedula": cedula,
-                    "ciudad": ciudad,
-                    "provincia": provincia,
-                    "direccion": direccion
-                })
+            est.update({
+                "nombre":     nombre,
+                "correo":     correo,
+                "telefono":   telefono,
+                "cedula":     cedula,
+                "ciudad":     ciudad,
+                "provincia":  provincia,
+                "direccion":  direccion
+            })
 
-                precio = next(
-                    (i["precio"] for i in inv if
-                     normalize(i["marca"]) == normalize(est["marca"]) and
-                     normalize(i["modelo"]) == normalize(est["modelo"]) and
-                     normalize(i["color"]) == normalize(est["color"])),
-                    None
-                )
+            precio = next(
+                (i["precio"] for i in inv if
+                 normalize(i["marca"])  == normalize(est["marca"]) and
+                 normalize(i["modelo"]) == normalize(est["modelo"]) and
+                 normalize(i["color"])  == normalize(est["color"])),
+                None
+            )
 
-                est["precio_total"] = int(precio) if precio else 0
-                sale_id = generate_sale_id()
-                est["sale_id"] = sale_id
+            est["precio_total"] = int(precio) if precio else 0
+            sale_id             = generate_sale_id()
+            est["sale_id"]      = sale_id
 
-                resumen = (
-                    f"✅ Pedido: {sale_id}\n"
-                    f"👤Nombre: {nombre}\n"
-                    f"📧Correo: {correo}\n"
-                    f"📱Celular: {telefono}\n"
-                    f"🪪Cédula: {cedula}\n"
-                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
-                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
-                )
+            resumen = (
+                f"✅ Pedido: {sale_id}\n"
+                f"👤Nombre: {nombre}\n"
+                f"📧Correo: {correo}\n"
+                f"📱Celular: {telefono}\n"
+                f"🪪Cédula: {cedula}\n"
+                f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
+            )
 
-                est["fase"] = "confirmar_datos_guardados"
-                estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen)
-                return
+            est["fase"] = "confirmar_datos_guardados"
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+            return
 
-            # 🧾 Si no tiene memoria, continuar con flujo normal
-            est["fase"] = "esperando_nombre"
+        # 🧾 Si no tiene memoria, continuar flujo normal
+        est["fase"] = "esperando_nombre"
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Tu nombre completo para el pedido? ",
+            parse_mode="Markdown"
+        )
+        return
+
+    # ─────────────────────────────────────────
+    # 👤 Confirmar o EDITAR los datos guardados
+    # ─────────────────────────────────────────
+    if est.get("fase") == "confirmar_datos_guardados":
+        # A) Todo correcto → pasar a pago
+        if any(p in txt for p in ("todo bien", "todo correcto", "está bien", "está bien",
+                                  "correcto", "ok", "si", "sí", "vale", "dale")):
+            est["fase"] = "esperando_pago"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿Tu nombre completo para el pedido? ",
+                text="Perfecto ✅. ¿Cómo deseas hacer el pago, *transferencia* o *contraentrega*? 💳",
                 parse_mode="Markdown"
             )
             return
 
-        else:
+        # B) Saber qué dato cambiar
+        campos = {
+            "nombre":    ["nombre"],
+            "correo":    ["correo", "email", "mail"],
+            "telefono":  ["telefono", "teléfono", "celular", "cel"],
+            "cedula":    ["cedula", "cédula", "dni", "id"],
+            "ciudad":    ["ciudad"],
+            "provincia": ["provincia", "departamento"],
+            "direccion": ["direccion", "dirección", "dir"]
+        }
+        for campo, aliases in campos.items():
+            if any(a in txt for a in aliases):
+                est["campo_a_editar"] = campo
+                est["fase"] = "editando_dato"
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=f"Por favor escribe el nuevo *{campo}* 📝",
+                    parse_mode="Markdown"
+                )
+                return
+
+        # C) No entendimos qué quiere cambiar
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="Indícame qué dato deseas cambiar (nombre, correo, teléfono, ciudad, etc.).",
+            parse_mode="Markdown"
+        )
+        return
+
+    # ─────────────────────────────────────────
+    # 💾 Recibir y guardar el NUEVO valor
+    # ─────────────────────────────────────────
+    if est.get("fase") == "editando_dato":
+        campo = est.get("campo_a_editar")
+
+        # Validaciones básicas
+        if campo == "correo" and not re.match(r"[^@]+@[^@]+\.[^@]+", txt_raw):
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=f"⚠️ Las tallas disponibles para {est['modelo']} color {est['color']} son:\n{', '.join(tallas)}",
-                parse_mode="Markdown",
-                reply_markup=menu_botones(tallas),
+                text="⚠️ Ese correo no parece válido. Intenta con nombre@dominio.com",
+                parse_mode="Markdown"
             )
             return
+        if campo == "telefono" and not re.match(r"^\+?\d{7,15}$", txt_raw):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Ese teléfono no es válido. Incluye solo números y, opcional, el +57.",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Guardar dato
+        est[campo] = txt_raw.strip()
+        est.pop("campo_a_editar", None)
+        est["fase"] = "confirmar_datos_guardados"
+
+        # Resumen actualizado
+        resumen = (
+            f"🔄 *Datos actualizados:*\n\n"
+            f"👤Nombre: {est.get('nombre')}\n"
+            f"📧Correo: {est.get('correo')}\n"
+            f"📱Celular: {est.get('telefono')}\n"
+            f"🪪Cédula: {est.get('cedula')}\n"
+            f"📍Dirección: {est.get('direccion')}, {est.get('ciudad')}, {est.get('provincia')}\n"
+            f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+            f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+            "¿Todo correcto o quieres cambiar otro dato?"
+        )
+        await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+        return
+
 
 
 
@@ -2262,6 +2380,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
         )
     return
+# ─────────────────────────────────────────
+# FUNCIÓN AUXILIAR – REANUDAR FASE
+# ─────────────────────────────────────────
+async def reanudar_fase_actual(cid, ctx, est):
+    fase = est.get("fase")
+    if fase == "esperando_nombre":
+        await ctx.bot.send_message(chat_id=cid, text="¿Cuál es tu nombre completo? ✍️")
+    elif fase == "esperando_correo":
+        await ctx.bot.send_message(chat_id=cid, text="¿Cuál es tu correo electrónico? 📧")
+    elif fase == "esperando_telefono":
+        await ctx.bot.send_message(chat_id=cid, text="¿Tu número de teléfono? 📱")
+    elif fase == "esperando_cedula":
+        await ctx.bot.send_message(chat_id=cid, text="¿Tu número de cédula? 🪪")
+    elif fase == "esperando_ciudad":
+        await ctx.bot.send_message(chat_id=cid, text="¿En qué ciudad estás? 🏙️")
+    elif fase == "esperando_provincia":
+        await ctx.bot.send_message(chat_id=cid, text="¿Departamento o provincia? 🏞️")
+    elif fase == "esperando_direccion":
+        await ctx.bot.send_message(chat_id=cid, text="¿Dirección exacta de envío? 🏡")
 
 # Función para manejar la solicitud de precio por referencia
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
