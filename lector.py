@@ -1059,6 +1059,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 
+# ─────────────────────────────────────────
+# FUNCIÓN AUXILIAR – ENVIAR VIDEO
+# ─────────────────────────────────────────
 async def enviar_video_referencia(cid, ctx, referencia):
     opciones = {
         "261": "referencias.mp4",
@@ -1101,13 +1104,15 @@ async def enviar_video_referencia(cid, ctx, referencia):
             text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
         )
 
-
-
- # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
+# ─────────────────────────────────────────
+# DENTRO DE responder()  ➜  después del bloque de video
+# (misma indentación que los demás `if`)
+# ─────────────────────────────────────────
+    # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
     palabras_precio = (
         "precio", "preció", "prezio", "que presio tienen",
-        "valor", "que presio hay", "vale", "valen", "que precio tienen", "vale esto", "valen esto",
-        "costo", "kosto", "cuesto",
+        "valor",  "que presio hay", "vale", "valen", "que precio tienen",
+        "vale esto", "valen esto", "costo", "kosto", "cuesto",
         "cuanto cuesta", "cuanto vale", "cuanto esta", "cuanto es",
         "cuanto valen", "cuanto cuestan", "cuanto sale", "que precio", "que vale",
         "kuanto cuesta", "kuanto bale", "cuanttto bale", "k vale", "q cuesta",
@@ -1116,11 +1121,11 @@ async def enviar_video_referencia(cid, ctx, referencia):
         "balor", "cuanto baale", "k bale", "vale eso", "cuanto valdra"
     )
 
-    txt_norm = normalize(txt)  # ⇢ quita tildes / minúsculas
+    txt_norm = normalize(txt)  # ⇢ minúsculas y sin tildes
 
     pregunta_precio = (
         any(p in txt_norm for p in palabras_precio) or
-        any(difflib.get_close_matches(w, palabras_precio, n=1, cutoff=0.8)
+        any(difflib.get_close_matches(w, palabras_precizo, n=1, cutoff=0.8)
             for w in txt_norm.split())
     )
 
@@ -1130,13 +1135,15 @@ async def enviar_video_referencia(cid, ctx, referencia):
                 (i["precio"] for i in inv if
                  normalize(i["marca"])  == normalize(est.get("marca", "")) and
                  normalize(i["modelo"]) == normalize(est["modelo"]) and
-                 normalize(i["color"])  == normalize(est["color"])),
+                 normalize(i["color"])  == normalize(est["color"])
+                ),
                 None
             )
             if precio:
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=f"💰 El modelo *{est['modelo']}* color *{est['color']}* tiene un precio de *${precio}* COP.",
+                    text=f"💰 El modelo *{est['modelo']}* color *{est['color']}* "
+                         f"tiene un precio de *${precio}* COP.",
                     parse_mode="Markdown"
                 )
             else:
@@ -1147,9 +1154,11 @@ async def enviar_video_referencia(cid, ctx, referencia):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Para darte el precio necesito saber referencia o repetirla. ¿Puedes decirme cuál estás mirando?"
+                text=("Para darte el precio necesito saber la referencia o repetirla. "
+                      "¿Puedes decirme cuál estás mirando?")
             )
         return
+
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
