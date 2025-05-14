@@ -63,6 +63,7 @@ logging.basicConfig(level=logging.INFO,
 
 # ─── Instancia de FastAPI ────────────────────────────────────────────────
 api = FastAPI(title="AYA Bot – WhatsApp")
+logging.basicConfig(level=logging.DEBUG)
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -1016,29 +1017,21 @@ def generate_sale_id() -> str:
     return f"VEN-{ts}-{rnd}"
 
 
-# ─────────────────────────────────────────
-# FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM)
-# ─────────────────────────────────────────
-
+# ────────────────────────────────────────────────────────────
+# FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM) CON LOGS DETALLADOS
+# ────────────────────────────────────────────────────────────
 async def enviar_video_referencia(cid, ctx, referencia):
-    # Mapa lógico: lo que el usuario puede escribir
+    logging.info(f"[VIDEO_FN] ⇢ Petición video ref={referencia!r}  cid={cid}")
+
     opciones = {
-        "261": "referencias.mp4",
-        "ds 261": "referencias.mp4",
-        "277": "referencias2.mp4",
-        "ds 277": "referencias2.mp4",
-        "303": "referencias2.mp4",
-        "ds 303": "referencias2.mp4",
-        "niño": "infantil.mp4",
-        "niños": "infantil.mp4",
-        "infantil": "infantil.mp4",
-        "kids": "infantil.mp4",
-        "promo": "descuentos.mp4",
-        "descuento": "descuentos.mp4",
+        "261": "referencias.mp4",  "ds 261": "referencias.mp4",
+        "277": "referencias2.mp4", "ds 277": "referencias2.mp4",
+        "303": "referencias2.mp4", "ds 303": "referencias2.mp4",
+        "niño": "infantil.mp4",    "niños":  "infantil.mp4",
+        "infantil": "infantil.mp4","kids":   "infantil.mp4",
+        "promo": "descuentos.mp4", "descuento": "descuentos.mp4",
         "descuentos": "descuentos.mp4"
     }
-
-    # Mapa real: nombres exactos que quedaron en disco (con mayúsculas)
     nombres_real = {
         "referencias.mp4":  "Referencias.mp4",
         "referencias2.mp4": "Referencias2.mp4",
@@ -1046,11 +1039,14 @@ async def enviar_video_referencia(cid, ctx, referencia):
         "descuentos.mp4":   "Descuentos.mp4"
     }
 
-    ref = normalize(referencia).lower()
-    nombre_logico = opciones.get(ref)
-    nombre_real = nombres_real.get(nombre_logico)
+    ref_norm = normalize(referencia).lower()
+    nombre_logico = opciones.get(ref_norm)
+    nombre_real   = nombres_real.get(nombre_logico)
+    logging.debug(f"[VIDEO_FN] ref_norm={ref_norm}  "
+                  f"nombre_logico={nombre_logico}  nombre_real={nombre_real}")
 
     if not nombre_real:
+        logging.warning(f"[VIDEO_FN] Video no reconocido para ref={ref_norm}")
         await ctx.bot.send_message(
             chat_id=cid,
             text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
@@ -1058,32 +1054,43 @@ async def enviar_video_referencia(cid, ctx, referencia):
         return None
 
     ruta_video = os.path.join("/var/data/videos", nombre_real)
-    if not os.path.exists(ruta_video):
+    existe = os.path.exists(ruta_video)
+    logging.debug(f"[VIDEO_FN] ruta_video={ruta_video}  existe={existe}")
+
+    if not existe:
         await ctx.bot.send_message(
             chat_id=cid,
             text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
         )
         return None
 
+    tamaño = os.path.getsize(ruta_video)
+    logging.debug(f"[VIDEO_FN] Tamaño archivo='{nombre_real}' = {tamaño:,} bytes")
+
     try:
         with open(ruta_video, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
 
-        return {
+        logging.debug(f"[VIDEO_FN] Longitud base64 = {len(b64):,} caracteres")
+
+        video_dict = {
             "type": "video",
             "base64": b64,
             "mimetype": "video/mp4",
             "filename": nombre_real,
             "text": "🎬 Aquí tienes el video solicitado 👇"
         }
+        logging.info(f"[VIDEO_FN] ✓ Dict video listo para enviar (keys={list(video_dict.keys())})")
+        return video_dict
 
     except Exception as e:
-        logging.error(f"❌ Error al enviar video: {e}")
+        logging.error(f"[VIDEO_FN] ❌ Error leyendo/enviando video: {e}")
         await ctx.bot.send_message(
             chat_id=cid,
             text="❌ No logré enviarte el video. Intenta de nuevo."
         )
         return None
+
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1152,26 +1159,32 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🎬 Procesar selección de video
     if est.get("fase") == "esperando_video_referencia":
-        ref = normalize(txt_raw)
-        video_respuesta = await enviar_video_referencia(cid, ctx, ref)
+        logging.info("[RESPONDER] ⇢ Entró fase 'esperando_video_referencia'")
+        logging.debug(f"[RESPONDER] Texto bruto = {txt_raw!r}")
 
+        ref = normalize(txt_raw)
+        logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
+
+        video_respuesta = await enviar_video_referencia(cid, ctx, ref)
+        logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
+
+        # Reinicia fase a inicio
         est["fase"] = "inicio"
         estado_usuario[cid] = est
 
-        if video_respuesta:
-            await ctx.bot.send_video(
-                chat_id=cid,
-                video=video_respuesta["base64"],
-                caption=video_respuesta.get("text", ""),
-                parse_mode="Markdown"
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ No logré encontrar el video. Intenta con otra referencia.",
-                parse_mode="Markdown"
-            )
+        if isinstance(video_respuesta, dict):
+            logging.info("[RESPONDER] ✓ Dict video recibido – se devolverá al webhook")
+            logging.debug(f"[RESPONDER] Claves dict = {list(video_respuesta.keys())}")
+            return video_respuesta
+
+        logging.warning("[RESPONDER] ⚠️ No se obtuvo dict de video, enviando mensaje fallback")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ No logré encontrar o enviar el video. Intenta con otra referencia.",
+            parse_mode="Markdown"
+        )
         return
+
 
 
     # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
