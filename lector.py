@@ -1024,14 +1024,26 @@ async def enviar_video_referencia(cid, ctx, referencia):
     logging.info(f"[VIDEO_FN] ⇢ Petición video ref={referencia!r}  cid={cid}")
 
     opciones = {
-        "261": "referencias.mp4",  "ds 261": "referencias.mp4",
+        # 🔥 Referencias2.mp4
+        "261": "referencias2.mp4", "ds 261": "referencias2.mp4",
         "277": "referencias2.mp4", "ds 277": "referencias2.mp4",
         "303": "referencias2.mp4", "ds 303": "referencias2.mp4",
-        "niño": "infantil.mp4",    "niños":  "infantil.mp4",
-        "infantil": "infantil.mp4","kids":   "infantil.mp4",
+        "295": "referencias2.mp4", "ds 295": "referencias2.mp4",
+        "299": "referencias2.mp4", "ds 299": "referencias2.mp4",
+
+        # 📼 Referencias.mp4
+        "279": "referencias.mp4",  "ds 279": "referencias.mp4",
+        "304": "referencias.mp4",  "ds 304": "referencias.mp4",
+        "305": "referencias.mp4",  "ds 305": "referencias.mp4",
+
+        # 👟 Otros
+        "niño": "infantil.mp4",    "niños": "infantil.mp4",
+        "infantil": "infantil.mp4","kids":  "infantil.mp4",
+
         "promo": "descuentos.mp4", "descuento": "descuentos.mp4",
         "descuentos": "descuentos.mp4"
     }
+
     nombres_real = {
         "referencias.mp4":  "Referencias.mp4",
         "referencias2.mp4": "Referencias2.mp4",
@@ -1041,9 +1053,11 @@ async def enviar_video_referencia(cid, ctx, referencia):
 
     ref_norm = normalize(referencia).lower()
     nombre_logico = opciones.get(ref_norm)
-    nombre_real   = nombres_real.get(nombre_logico)
-    logging.debug(f"[VIDEO_FN] ref_norm={ref_norm}  "
-                  f"nombre_logico={nombre_logico}  nombre_real={nombre_real}")
+    nombre_real = nombres_real.get(nombre_logico)
+    logging.debug(
+        f"[VIDEO_FN] ref_norm={ref_norm}  "
+        f"nombre_logico={nombre_logico}  nombre_real={nombre_real}"
+    )
 
     if not nombre_real:
         logging.warning(f"[VIDEO_FN] Video no reconocido para ref={ref_norm}")
@@ -1092,6 +1106,7 @@ async def enviar_video_referencia(cid, ctx, referencia):
         return None
 
 
+
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1138,24 +1153,24 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
-    # 🎬 Si el cliente pide ver videos
-    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                "• *DS 261* 🔥\n"
-                "• *DS 277* 🔥\n"
-                "• *DS 303* 🔥\n"
-                "• *REFERENCIAS NIÑO* 👶\n"
-                "• *PROMO DESCUENTOS* 💸\n\n"
-                "Escríbeme el número o el nombre del video que deseas ver."
-            ),
-            parse_mode="Markdown"
-        )
-        est["fase"] = "esperando_video_referencia"
-        estado_usuario[cid] = est
-        return
+    # 🎬 Si el cliente pide ver videos (solo si NO está ya esperando uno)
+    if est.get("fase") != "esperando_video_referencia":
+        if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
+                    "• *DS 279 304 305* 🔥\n"
+                    "• *DS 261 277 303 295 299* 🔥\n"
+                    "• *REFERENCIAS NIÑO* 👶\n"
+                    "• *PROMO DESCUENTOS 39% OFF* 💸\n\n"
+                    "Escríbeme el número o el nombre del video que deseas ver."
+                ),
+                parse_mode="Markdown"
+            )
+            est["fase"] = "esperando_video_referencia"
+            estado_usuario[cid] = est
+            return
 
     # 🎬 Procesar selección de video
     if est.get("fase") == "esperando_video_referencia":
@@ -1168,7 +1183,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         video_respuesta = await enviar_video_referencia(cid, ctx, ref)
         logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
 
-        # Reinicia fase a inicio
         est["fase"] = "inicio"
         estado_usuario[cid] = est
 
@@ -1184,6 +1198,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
 
 
 
