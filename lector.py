@@ -54,28 +54,39 @@ from telegram.ext import (
     filters,
 )
 
-CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"  # ID de tu carpeta en Google Drive
+CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"  # 👈 tu carpeta en Drive
 
 def descargar_videos_drive():
+    """
+    Descarga todos los .mp4 de la carpeta de Drive a /var/data/videos.
+    Solo baja los que aún no existen en disco.
+    Deja trazas detalladas en los logs.
+    """
     try:
         service = get_drive_service()
         os.makedirs("/var/data/videos", exist_ok=True)
+
+        logging.info("📂 [Videos] Iniciando descarga desde Drive…")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_VIDEOS_DRIVE}")
 
         resultados = service.files().list(
             q=f"'{CARPETA_VIDEOS_DRIVE}' in parents and mimeType='video/mp4'",
             fields="files(id, name)"
         ).execute()
 
-        for archivo in resultados.get("files", []):
+        archivos = resultados.get("files", [])
+        logging.info(f"🔎 {len(archivos)} archivo(s) .mp4 encontrados en la carpeta.")
+
+        for archivo in archivos:
             nombre = archivo["name"]
             id_video = archivo["id"]
             ruta_destino = os.path.join("/var/data/videos", nombre)
 
             if os.path.exists(ruta_destino):
-                logging.info(f"📦 Ya existe: {nombre}")
+                logging.info(f"📦 Ya existe: {nombre} — se omite descarga.")
                 continue
 
-            logging.info(f"⬇️ Descargando {nombre} desde Drive")
+            logging.info(f"⬇️ Descargando {nombre}…")
             request = service.files().get_media(fileId=id_video)
             buffer = io.BytesIO()
             downloader = MediaIoBaseDownload(buffer, request)
@@ -87,9 +98,13 @@ def descargar_videos_drive():
             with open(ruta_destino, "wb") as f:
                 f.write(buffer.getvalue())
 
-        logging.info("✅ Descarga de videos completada.")
+            logging.info(f"✅ Guardado en {ruta_destino}")
+
+        logging.info("🎉 Descarga de videos completada.")
+
     except Exception as e:
         logging.error(f"❌ Error descargando videos desde Drive: {e}")
+
 # 🧠 Anti-duplicados por mensaje ID
 ultimo_msg = {}
 
@@ -1085,6 +1100,7 @@ async def enviar_video_referencia(cid, ctx, referencia):
             chat_id=cid,
             text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
         )
+
 
 
  # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
