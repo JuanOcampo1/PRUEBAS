@@ -1093,6 +1093,7 @@ async def enviar_video_referencia(cid, ctx, referencia):
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     numero = str(cid)
+
     # 1) Primer contacto: saludo
     if cid not in estado_usuario:
         reset_estado(cid)
@@ -1139,7 +1140,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
-
     # 🎬 Si el cliente pide ver videos
     if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
         await ctx.bot.send_message(
@@ -1168,7 +1168,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
 
         if video_respuesta:
-            return video_respuesta
+            return video_respuesta  # ⬅️ Muy importante para que Venom lo reciba y lo envíe
         return
 
 
@@ -1641,7 +1641,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cliente = obtener_datos_cliente(numero)
 
         if cliente:
-            # ── 1. Cargar datos guardados ───────────────────────────────
             nombre    = cliente.get("nombre", "cliente")
             correo    = cliente.get("correo", "No registrado")
             telefono  = cliente.get("telefono", numero)
@@ -1651,29 +1650,27 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             direccion = cliente.get("direccion", "No registrada")
 
             est.update({
-                "nombre":    nombre,
-                "correo":    correo,
-                "telefono":  telefono,
-                "cedula":    cedula,
-                "ciudad":    ciudad,
+                "nombre": nombre,
+                "correo": correo,
+                "telefono": telefono,
+                "cedula": cedula,
+                "ciudad": ciudad,
                 "provincia": provincia,
                 "direccion": direccion
             })
 
-            # ── 2. Precio y resumen ────────────────────────────────────
             precio = next(
                 (i["precio"] for i in inv
-                 if normalize(i["marca"])  == normalize(est["marca"])
+                 if normalize(i["marca"]) == normalize(est["marca"])
                  and normalize(i["modelo"]) == normalize(est["modelo"])
-                 and normalize(i["color"])  == normalize(est["color"])),
+                 and normalize(i["color"]) == normalize(est["color"])),
                 None
             )
             est["precio_total"] = int(precio) if precio else 0
-            sale_id             = generate_sale_id()
-            est["sale_id"]      = sale_id
+            est["sale_id"] = generate_sale_id()
 
             resumen = (
-                f"✅ Pedido: {sale_id}\n"
+                f"✅ Pedido: {est['sale_id']}\n"
                 f"👤Nombre: {nombre}\n"
                 f"📧Correo: {correo}\n"
                 f"📱Celular: {telefono}\n"
@@ -1689,45 +1686,68 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
             return
 
-        # 🧾 Si no existe memoria → continuar flujo normal
+        # 🧾 No hay cliente guardado → continuar normal
         est["fase"] = "esperando_nombre"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿Tu nombre completo para el pedido? ",
+            text="¿Tu nombre completo para el pedido?",
             parse_mode="Markdown"
         )
         return
 
-
-    # ─────────────────────────────────────────
-    # 👤  CONFIRMAR o EDITAR los datos guardados
-    # ─────────────────────────────────────────
+    # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
-        # A) Todo correcto → avanzar a pago
         if any(p in txt for p in (
             "todo bien", "todo correcto", "está bien", "esta bien",
             "correcto", "ok", "listo", "si", "sí", "vale", "dale"
         )):
             est["fase"] = "esperando_pago"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Perfecto ✅. ¿Cómo deseas hacer el pago, *transferencia* o *contraentrega*? 💳",
-                parse_mode="Markdown"
+            precio = est.get("precio_total", 0)
+            est["sale_id"] = est.get("sale_id") or generate_sale_id()
+
+            est["resumen"] = {
+                "Número Venta": est["sale_id"],
+                "Fecha Venta": datetime.now().isoformat(),
+                "Cliente": est.get("nombre"),
+                "Teléfono": est.get("telefono"),
+                "Cédula": est.get("cedula"),
+                "Producto": est.get("modelo"),
+                "Color": est.get("color"),
+                "Talla": est.get("talla"),
+                "Correo": est.get("correo"),
+                "Pago": None,
+                "Estado": "PENDIENTE"
+            }
+
+            msg = (
+                f"✅ Pedido: {est['sale_id']}\n"
+                f"👤Nombre: {est['nombre']}\n"
+                f"📧Correo: {est['correo']}\n"
+                f"📱Celular: {est['telefono']}\n"
+                f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+                f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                f"💲Valor a pagar: {precio:,} COP\n\n"
+                "¿Cómo deseas hacer el pago?\n"
+                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
+                "Escribe *Transferencia* o *Contraentrega*."
             )
+            await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+            estado_usuario[cid] = est
             return
 
-        # B) Detectar qué campo quiere cambiar
+        # B) Detectar qué campo desea cambiar
         campos = {
-            "nombre":    ["nombre"],
-            "correo":    ["correo", "email", "mail"],
-            "telefono":  ["telefono", "teléfono", "celular", "cel"],
-            "cedula":    ["cedula", "cédula", "dni", "id"],
-            "ciudad":    ["ciudad"],
+            "nombre": ["nombre"],
+            "correo": ["correo", "email", "mail"],
+            "telefono": ["telefono", "teléfono", "celular", "cel"],
+            "cedula": ["cedula", "cédula", "dni", "id"],
+            "ciudad": ["ciudad"],
             "provincia": ["provincia", "departamento"],
             "direccion": ["direccion", "dirección", "dir"]
         }
-        for campo, aliases in campos.items():
-            if any(a in txt for a in aliases):
+        for campo, alias in campos.items():
+            if any(a in txt for a in alias):
                 est["campo_a_editar"] = campo
                 est["fase"] = "editando_dato"
                 await ctx.bot.send_message(
@@ -1737,7 +1757,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        # C) No se entendió qué cambiar
         await ctx.bot.send_message(
             chat_id=cid,
             text="Indícame qué dato deseas cambiar (nombre, correo, teléfono, ciudad, etc.).",
@@ -1745,14 +1764,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-
-    # ─────────────────────────────────────────
-    # 💾  Recibir y GUARDAR el nuevo valor
-    # ─────────────────────────────────────────
+    # 💾 Guardar nuevo valor editado
     if est.get("fase") == "editando_dato":
         campo = est.get("campo_a_editar")
 
-        # Validaciones básicas
         if campo == "correo" and not re.match(r"[^@]+@[^@]+\.[^@]+", txt_raw):
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1768,7 +1783,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Guardar y volver a confirmar
         est[campo] = txt_raw.strip()
         est.pop("campo_a_editar", None)
         est["fase"] = "confirmar_datos_guardados"
@@ -1787,6 +1801,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
         return
 
+
+
+    # ✏️ Nombre del cliente
+    if est.get("fase") == "esperando_nombre":
+        est["nombre"] = txt_raw
+        est["fase"] = "esperando_correo"
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Cuál es tu correo electrónico? 📧",
+            parse_mode="Markdown"
+        )
+        return
 
 
 
@@ -2696,44 +2722,30 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 @api.post("/venom")
 async def venom_webhook(req: Request):
     """Webhook principal que recibe los mensajes de Venom y procesa imagen, audio o texto."""
-
-    # 0️⃣  INVENTARIO  ──────────────────────────────────────────────────────
-    #  🔸  NO uses await:  obtener_inventario() ya devuelve la lista.
-    inv = obtener_inventario()           # ⬅️  quitá el await
+    inv = obtener_inventario()
 
     try:
-        # 1️⃣  JSON DEL MENSAJE  ───────────────────────────────────────────
         data = await req.json()
-        cid      = wa_chat_id(data.get("from", ""))
-        body     = data.get("body", "") or ""
-        mtype    = (data.get("type") or "").lower()
+        cid = wa_chat_id(data.get("from", ""))
+        body = data.get("body", "") or ""
+        mtype = (data.get("type") or "").lower()
         mimetype = (data.get("mimetype") or "").lower()
 
-        logging.info(
-            f"📩 Mensaje recibido — CID:{cid} — Tipo:{mtype} — MIME:{mimetype}"
-        )
+        logging.info(f"📩 Mensaje recibido — CID:{cid} — Tipo:{mtype} — MIME:{mimetype}")
 
-        # 2️⃣  FILTROS PARA NO RESPONDER CHATS VIEJOS/NOTIFICACIONES  ──────
         if (
-            data.get("isForwarded")            # reenviados
-            or data.get("isNotification")      # notificaciones del sistema
-            or data.get("type") == "e2e_notification"
-            or data.get("fromMe")              # enviados por tu propio bot
-            or data.get("isSentByMe")          # (algunas versiones de Venom)
-            or data.get("isGroupMsg")          # mensajes de grupos
-            or not body                        # mensajes vacíos
+            data.get("isForwarded") or
+            data.get("isNotification") or
+            data.get("type") == "e2e_notification" or
+            data.get("fromMe") or
+            data.get("isSentByMe") or
+            data.get("isGroupMsg") or
+            not body
         ):
             logging.warning(f"[VENOM] Ignorado — CID:{cid}")
             return {"status": "ignored"}
 
-
-        # ───────────────────────────────────────────────────────────────────
-        #  A partir de acá continúa TODO tu código (imagen, texto, audio…)
-        # ───────────────────────────────────────────────────────────────────
-
-
-
-        # 2️⃣ IMAGEN ---------------------------------------------------------
+        # 🖼️ IMAGEN
         if mtype == "image" or mimetype.startswith("image"):
             try:
                 b64_str = body.split(",", 1)[1] if "," in body else body
@@ -2744,12 +2756,11 @@ async def venom_webhook(req: Request):
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-            # 🧠 Estado actual del usuario
             est = estado_usuario.get(cid, {})
             fase = est.get("fase", "")
             logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
-            # 3️⃣ COMPROBANTE -------------------------------------------------
+            # 📄 COMPROBANTE
             if fase == "esperando_comprobante":
                 try:
                     os.makedirs("temp", exist_ok=True)
@@ -2796,15 +2807,12 @@ async def venom_webhook(req: Request):
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
 
-            # 4️⃣ CLIP --------------------------------------------------------
+            # 🔍 CLIP (identificación de modelo)
             else:
                 try:
                     logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
-                    # 4.1️⃣ Cargar embeddings
                     embeddings_raw = cargar_embeddings_desde_cache()
-                    logging.debug(f"[CLIP] Embeddings cargados: {len(embeddings_raw)} modelos")
-
                     embeddings: dict[str, list[list[float]]] = {}
                     for modelo, vecs in embeddings_raw.items():
                         if isinstance(vecs, list):
@@ -2815,24 +2823,17 @@ async def venom_webhook(req: Request):
                                 if limpios:
                                     embeddings[modelo] = limpios
 
-                    # 4.2️⃣ Guardar imagen temporal
                     os.makedirs("temp", exist_ok=True)
                     path_img = f"temp/{cid}_img.jpg"
                     with open(path_img, "wb") as f:
                         f.write(img_bytes)
 
-                    logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
-
-                    # 4.3️⃣ Generar embedding cliente
                     emb_u = generar_embedding_imagen(img)
                     emb_u = torch.tensor(emb_u, dtype=torch.float32)
                     emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
                     if emb_u.shape[0] != 512:
                         raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
-                    logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
-                    logging.info(f"[DEBUG] Embedding usuario (primeros 5): {emb_u[:5]}")
 
-                    # 4.4️⃣ Comparar con embeddings existentes
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
@@ -2840,18 +2841,14 @@ async def venom_webhook(req: Request):
                                 arr_ref = torch.tensor(emb_ref, dtype=torch.float32)
                                 arr_ref = torch.nn.functional.normalize(arr_ref, dim=-1)
                                 sim = torch.dot(emb_u, arr_ref).item()
-                                logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
                                 if sim > mejor_sim:
                                     mejor_sim, mejor_modelo = sim, modelo
                             except Exception as e:
                                 logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
 
-                    logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
-                    logging.info(f"🔍 Modelo detectado: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
+                    logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                                        # 4.5️⃣ Respuesta final
                     if mejor_modelo and mejor_sim >= 0.85:
-                        logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
@@ -2861,11 +2858,9 @@ async def venom_webhook(req: Request):
                             color="_".join(p[2:]) if len(p) > 2 else "Des."
                         )
 
-                        # 🔍 Buscar precio si es posible
-
-                        modelo = estado_usuario[cid].get("modelo")
-                        color = estado_usuario[cid].get("color")
-                        marca = estado_usuario[cid].get("marca")
+                        modelo = estado_usuario[cid]["modelo"]
+                        color = estado_usuario[cid]["color"]
+                        marca = estado_usuario[cid]["marca"]
                         precio = next(
                             (i["precio"] for i in inv if
                              normalize(i["modelo"]) == normalize(modelo) and
@@ -2873,7 +2868,6 @@ async def venom_webhook(req: Request):
                              normalize(i["marca"]) == normalize(marca)),
                             None
                         )
-
                         precio_str = f"{int(precio):,} COP" if precio else "No disponible"
 
                         return JSONResponse({
@@ -2895,7 +2889,6 @@ async def venom_webhook(req: Request):
                             )
                         })
 
-
                 except Exception:
                     logging.exception("[CLIP] Error en identificación:")
                     return JSONResponse({
@@ -2903,14 +2896,18 @@ async def venom_webhook(req: Request):
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
 
-        # 5️⃣ TEXTO ----------------------------------------------------------
+        # 💬 TEXTO
         elif mtype == "chat":
             fase_actual = estado_usuario.get(cid, {}).get("fase", "")
             logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
             reply = await procesar_wa(cid, body)
-            return JSONResponse(reply)
 
-        # 6️⃣ AUDIO ----------------------------------------------------------
+            if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image"):
+                return JSONResponse(reply)
+
+            return JSONResponse({"type": "text", "text": reply} if isinstance(reply, str) else reply)
+
+        # 🎙️ AUDIO
         elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
             try:
                 logging.info("🎙️ Audio recibido. Iniciando procesamiento...")
@@ -2939,7 +2936,7 @@ async def venom_webhook(req: Request):
                     "text": "❌ Ocurrió un error al procesar tu audio. Intenta de nuevo."
                 })
 
-        # 7️⃣ TIPO NO MANEJADO -----------------------------------------------
+        # 🤷 TIPO NO MANEJADO
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({"type": "text", "text": f"⚠️ Tipo no manejado: {mtype}"})
@@ -2950,6 +2947,7 @@ async def venom_webhook(req: Request):
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
             status_code=200
         )
+
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
