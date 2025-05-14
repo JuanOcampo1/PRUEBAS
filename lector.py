@@ -1017,9 +1017,8 @@ def generate_sale_id() -> str:
 
 
 # ─────────────────────────────────────────
-# FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM)
+# FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM)
 # ─────────────────────────────────────────
-import base64
 
 async def enviar_video_referencia(cid, ctx, referencia):
     # Mapa lógico: lo que el usuario puede escribir
@@ -1049,14 +1048,14 @@ async def enviar_video_referencia(cid, ctx, referencia):
 
     ref = normalize(referencia).lower()
     nombre_logico = opciones.get(ref)
-    nombre_real   = nombres_real.get(nombre_logico)
+    nombre_real = nombres_real.get(nombre_logico)
 
     if not nombre_real:
         await ctx.bot.send_message(
             chat_id=cid,
             text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
         )
-        return
+        return None
 
     ruta_video = os.path.join("/var/data/videos", nombre_real)
     if not os.path.exists(ruta_video):
@@ -1064,14 +1063,12 @@ async def enviar_video_referencia(cid, ctx, referencia):
             chat_id=cid,
             text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
         )
-        return
+        return None
 
     try:
-        # Codificar video a base64 para que Venom lo pueda enviar
         with open(ruta_video, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
 
-        # Devolvemos el dict que lee tu webhook /venom
         return {
             "type": "video",
             "base64": b64,
@@ -1086,7 +1083,7 @@ async def enviar_video_referencia(cid, ctx, referencia):
             chat_id=cid,
             text="❌ No logré enviarte el video. Intenta de nuevo."
         )
-
+        return None
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1094,7 +1091,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     numero = str(cid)
 
-    # 1) Primer contacto: saludo
     if cid not in estado_usuario:
         reset_estado(cid)
         await update.message.reply_text(
@@ -1106,20 +1102,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 2) Estado actual e inventario
     est = estado_usuario[cid]
     inv = obtener_inventario()
 
-    # 3) Captura y normaliza texto
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
 
-    # ✅ DEBUG real
     print("🧠 FASE:", est.get("fase"))
     print("🧠 TEXTO:", txt_raw, "|", repr(txt_raw))
     print("🧠 ESTADO:", est)
 
-    # 4) Reinicio explícito si escribe /start o similares
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
         reset_estado(cid)
         await update.message.reply_text(
@@ -1131,7 +1123,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 5) Muestra el catálogo si lo menciona
     if menciona_catalogo(txt_raw):
         await ctx.bot.send_message(
             chat_id=cid,
@@ -1168,7 +1159,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
 
         if video_respuesta:
-            return video_respuesta  # ⬅️ Muy importante para que Venom lo reciba y lo envíe
+            await ctx.bot.send_video(
+                chat_id=cid,
+                video=video_respuesta["base64"],
+                caption=video_respuesta.get("text", ""),
+                parse_mode="Markdown"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ No logré encontrar el video. Intenta con otra referencia.",
+                parse_mode="Markdown"
+            )
         return
 
 
@@ -1331,23 +1333,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # FAQ 5: ¿Dónde están ubicados?
-        if any(frase in txt for frase in (
-            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-            "direccion", "dirección", "donde estan", "donde es la tienda",
-            "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
-        )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
+        if est.get("fase") not in ("editando_dato", "esperando_direccion"):
+            if any(frase in txt for frase in (
+                "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
+                "direccion", "dirección", "donde estan", "donde es la tienda",
+                "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
+            )):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                        "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                        "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                        "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                    ),
+                    parse_mode="Markdown"
+                )
+                await reanudar_fase_actual(cid, ctx, est)
+                return
+
 
         # FAQ 6: ¿Son nacionales o importados?
         if any(frase in txt for frase in (
