@@ -53,16 +53,42 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+# ─── Imports y logging ───────────────────────────────────────────────────
+import os, io, logging
+from fastapi import FastAPI
+from googleapiclient.http import MediaIoBaseDownload
 
-CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"  # 👈 tu carpeta en Drive
+logging.basicConfig(level=logging.INFO,
+                    format="%(levelname)s: %(message)s")
+
+# ─── Instancia de FastAPI ────────────────────────────────────────────────
+api = FastAPI(title="AYA Bot – WhatsApp")
+
+# ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
+def get_drive_service():
+    """
+    Devuelve un objeto service autenticado para la API de Drive.
+    Ajusta según tu implementación real.
+    """
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+
+    creds = Credentials.from_service_account_file(
+        "service_account.json",
+        scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
+    return build("drive", "v3", credentials=creds)
+
+# ─── Descarga de videos desde Drive ──────────────────────────────────────
+CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"   # ⬅️ tu carpeta
 
 def descargar_videos_drive():
     """
     Descarga todos los .mp4 de la carpeta de Drive a /var/data/videos.
-    Solo baja los que aún no existen en disco.
-    Deja trazas detalladas en los logs.
+    Solo baja los que aún no existan. Deja trazas en logs y prints.
     """
     try:
+        print(">>> descargar_videos_drive() – iniciando")
         service = get_drive_service()
         os.makedirs("/var/data/videos", exist_ok=True)
 
@@ -71,11 +97,12 @@ def descargar_videos_drive():
 
         resultados = service.files().list(
             q=f"'{CARPETA_VIDEOS_DRIVE}' in parents and mimeType='video/mp4'",
-            fields="files(id, name)"
+            fields="files(id, name, mimeType)"
         ).execute()
 
         archivos = resultados.get("files", [])
         logging.info(f"🔎 {len(archivos)} archivo(s) .mp4 encontrados en la carpeta.")
+        print(">>> Encontrados en Drive:", [f['name'] for f in archivos])
 
         for archivo in archivos:
             nombre = archivo["name"]
@@ -101,9 +128,19 @@ def descargar_videos_drive():
             logging.info(f"✅ Guardado en {ruta_destino}")
 
         logging.info("🎉 Descarga de videos completada.")
+        print(">>> descargar_videos_drive() – finalizado")
 
     except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_videos_drive:", e)
         logging.error(f"❌ Error descargando videos desde Drive: {e}")
+
+# ─── Hook de arranque de FastAPI ─────────────────────────────────────────
+@api.on_event("startup")
+async def startup_download_videos():
+    descargar_videos_drive()
+
+# ─── Resto de tu código (rutas, responder(), etc.) ───────────────────────
+# …
 
 # 🧠 Anti-duplicados por mensaje ID
 ultimo_msg = {}
