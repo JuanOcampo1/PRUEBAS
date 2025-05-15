@@ -1233,7 +1233,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
-
     # 🎬 Si el cliente pide ver videos (solo si NO está ya esperando uno)
     if est.get("fase") != "esperando_video_referencia":
         if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
@@ -1261,17 +1260,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ref = normalize(txt_raw)
         logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
 
-        video_respuesta = await enviar_video_referencia(cid, ctx, ref)  # envía video y devuelve nombre.mp4 o dict
+        video_respuesta = await enviar_video_referencia(cid, ctx, ref)
         logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
 
-        # Si enviar_video_referencia devuelve dict (Venom), se devuelve inmediatamente
         if isinstance(video_respuesta, dict):
+            # ✅ IMPORTANTE: guardar fase ANTES del return para WhatsApp (Venom)
+            est["video_activo"] = "referencia.mp4"  # o asigna según ref si quieres más precisión
+            est["fase"] = "esperando_color_post_video"
+            estado_usuario[cid] = est
             logging.info("[RESPONDER] ✓ Dict video recibido – se devolverá al webhook")
             return video_respuesta
 
-        # Guardamos video mostrado y avanzamos a fase de color
-        est["video_activo"] = str(video_respuesta)  # p. ej. "referencia.mp4"
-        est["fase"] = "esperando_color_post_video"
+        if video_respuesta:
+            est["video_activo"] = str(video_respuesta)  # por ejemplo: "referencia.mp4"
+            est["fase"] = "esperando_color_post_video"
+        else:
+            est["fase"] = "inicio"  # si no se reconoce el video
+
         estado_usuario[cid] = est
         return
 
@@ -1282,7 +1287,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(cid, "👀 No entendí el color. ¿Puedes repetirlo?")
             return
 
-        ruta = "/tmp/modelos_video"           # imágenes descargadas al iniciar
+        ruta = "/tmp/modelos_video"
         coincidencias = [
             f for f in os.listdir(ruta)
             if f.lower().endswith(".jpg") and color in f.lower()
@@ -1304,15 +1309,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 logging.error(f"❌ Error enviando imagen: {e}")
-                await ctx.bot.send_message(cid, f"⚠️ No pude enviar una de las imágenes.")
+                await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
 
         await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
         return
-
-
-
 
 
     # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
