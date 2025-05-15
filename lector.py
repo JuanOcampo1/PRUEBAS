@@ -79,6 +79,73 @@ def get_drive_service():
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
     return build("drive", "v3", credentials=creds)
+# ─── Descarga de imágenes de catálogo desde Drive ───────────────────────
+CARPETA_CATALOGO_DRIVE = "1_liZvzlyNj2P8koFU4fgFp5X8icUh_ZA"  # Carpeta principal
+
+def descargar_imagenes_catalogo():
+    """
+    Descarga una imagen por subcarpeta de la carpeta 'Envio de Imagenes Catalogo'.
+    Guarda las imágenes en /var/data/modelos_video/. No repite si ya existen.
+    """
+    try:
+        print(">>> descargar_imagenes_catalogo() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/modelos_video", exist_ok=True)
+
+        logging.info("📂 [Modelos Catálogo] Descargando imágenes desde Drive…")
+        logging.info(f"🆔 Carpeta raíz: {CARPETA_CATALOGO_DRIVE}")
+
+        # Obtener todas las subcarpetas (cada modelo-color)
+        subcarpetas = service.files().list(
+            q=f"'{CARPETA_CATALOGO_DRIVE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)"
+        ).execute().get("files", [])
+
+        for carpeta in subcarpetas:
+            nombre_carpeta = carpeta["name"]
+            id_carpeta = carpeta["id"]
+
+            logging.info(f"🔎 Buscando imagen en subcarpeta: {nombre_carpeta}")
+
+            # Buscar una imagen dentro de la subcarpeta
+            archivos = service.files().list(
+                q=f"'{id_carpeta}' in parents and mimeType contains 'image/' and trashed = false",
+                fields="files(id, name)",
+                pageSize=1
+            ).execute().get("files", [])
+
+            if not archivos:
+                logging.warning(f"⚠️ Sin imágenes en {nombre_carpeta}")
+                continue
+
+            imagen = archivos[0]
+            nombre_archivo = f"{nombre_carpeta}.jpg"
+            ruta_destino = os.path.join("/var/data/modelos_video", nombre_archivo)
+
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre_archivo} — omitiendo descarga.")
+                continue
+
+            logging.info(f"⬇️ Descargando imagen: {nombre_archivo}")
+            request = service.files().get_media(fileId=imagen["id"])
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
+
+            logging.info(f"✅ Imagen guardada: {ruta_destino}")
+
+        logging.info("🎉 Descarga de imágenes de catálogo completada.")
+        print(">>> descargar_imagenes_catalogo() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_imagenes_catalogo:", e)
+        logging.error(f"❌ Error descargando imágenes de catálogo: {e}")
 
 # ─── Descarga de videos desde Drive ──────────────────────────────────────
 CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"   # ⬅️ tu carpeta
@@ -1092,7 +1159,7 @@ async def enviar_video_referencia(cid, ctx, referencia):
             "base64": b64,
             "mimetype": "video/mp4",
             "filename": nombre_real,
-            "text": "🎬 Aquí tienes el video solicitado 👇"
+            "text": "🎬 Aquí tienes el video solicitado "
         }
         logging.info(f"[VIDEO_FN] ✓ Dict video listo para enviar (keys={list(video_dict.keys())})")
         return video_dict
@@ -1106,6 +1173,19 @@ async def enviar_video_referencia(cid, ctx, referencia):
         return None
 
 
+# ────────────────────────────────────────────────────────────
+# FUNCIÓN AUXILIAR – Detectar color en texto
+# ────────────────────────────────────────────────────────────
+def detectar_color(texto: str) -> str:
+    colores = [
+        "negro", "blanco", "rojo", "azul", "amarillo", "verde",
+        "rosado", "gris", "morado", "naranja", "café", "beige",
+        "neón", "limón"
+    ]
+    for c in colores:
+        if c in texto.lower():
+            return c
+    return ""
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1153,6 +1233,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
+
     # 🎬 Si el cliente pide ver videos (solo si NO está ya esperando uno)
     if est.get("fase") != "esperando_video_referencia":
         if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
@@ -1180,24 +1261,56 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ref = normalize(txt_raw)
         logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
 
-        video_respuesta = await enviar_video_referencia(cid, ctx, ref)
+        video_respuesta = await enviar_video_referencia(cid, ctx, ref)  # envía video y devuelve nombre.mp4 o dict
         logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
 
-        est["fase"] = "inicio"
-        estado_usuario[cid] = est
-
+        # Si enviar_video_referencia devuelve dict (Venom), se devuelve inmediatamente
         if isinstance(video_respuesta, dict):
             logging.info("[RESPONDER] ✓ Dict video recibido – se devolverá al webhook")
-            logging.debug(f"[RESPONDER] Claves dict = {list(video_respuesta.keys())}")
             return video_respuesta
 
-        logging.warning("[RESPONDER] ⚠️ No se obtuvo dict de video, enviando mensaje fallback")
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="⚠️ No logré encontrar o enviar el video. Intenta con otra referencia.",
-            parse_mode="Markdown"
-        )
+        # Guardamos video mostrado y avanzamos a fase de color
+        est["video_activo"] = str(video_respuesta)  # p. ej. "referencia.mp4"
+        est["fase"] = "esperando_color_post_video"
+        estado_usuario[cid] = est
         return
+
+    # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
+    if est.get("fase") == "esperando_color_post_video":
+        color = detectar_color(txt)
+        if not color:
+            await ctx.bot.send_message(cid, "👀 No entendí el color. ¿Puedes repetirlo?")
+            return
+
+        ruta = "/tmp/modelos_video"           # imágenes descargadas al iniciar
+        coincidencias = [
+            f for f in os.listdir(ruta)
+            if f.lower().endswith(".jpg") and color in f.lower()
+        ]
+
+        if not coincidencias:
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos en color {color.upper()}.")
+            return
+
+        for archivo in coincidencias:
+            try:
+                path = os.path.join(ruta, archivo)
+                modelo = archivo.replace(".jpg", "").replace("_", " ")
+                await ctx.bot.send_photo(
+                    chat_id=cid,
+                    photo=open(path, "rb"),
+                    caption=f"📸 En el video aparece el modelo *{modelo}*",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"❌ Error enviando imagen: {e}")
+                await ctx.bot.send_message(cid, f"⚠️ No pude enviar una de las imágenes.")
+
+        await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+        est["fase"] = "esperando_modelo_elegido"
+        estado_usuario[cid] = est
+        return
+
 
 
 
@@ -2621,7 +2734,7 @@ async def manejar_catalogo(update, ctx):
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid = str(cid)  # 🔐 ID siempre string
+    cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
 
@@ -2642,16 +2755,32 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
-        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
-        async def bot_send_chat_action(self, chat_id, action, **kw): pass
-        async def bot_send_video(self, chat_id, video, caption=None, **kw):
-            self.resp.append(f"[VIDEO] {caption or ' '}]")
-    ctx = DummyCtx(resp=[])
+        async def bot_send(self, chat_id, text, **kw):
+            self.resp.append({"type": "text", "text": text})
 
+        async def bot_send_chat_action(self, chat_id, action, **kw):
+            pass
+
+        async def bot_send_video(self, chat_id, video, caption=None, **kw):
+            self.resp.append({
+                "type": "video",
+                "path": video.name,
+                "text": caption or ""
+            })
+
+        async def bot_send_photo(self, chat_id, photo, caption=None, **kw):
+            self.resp.append({
+                "type": "photo",
+                "path": photo.name,
+                "text": caption or ""
+            })
+
+    ctx = DummyCtx(resp=[])
     ctx.bot = SimpleNamespace(
         send_message=ctx.bot_send,
         send_chat_action=ctx.bot_send_chat_action,
-        send_video=ctx.bot_send_video
+        send_video=ctx.bot_send_video,
+        send_photo=ctx.bot_send_photo
     )
 
     class DummyMsg(SimpleNamespace):
@@ -2663,7 +2792,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             self._ctx = ctx
 
         async def reply_text(self, text, **kw):
-            self._ctx.resp.append(text)
+            self._ctx.resp.append({"type": "text", "text": text})
 
     dummy_msg = DummyMsg(text=body, ctx=ctx)
     dummy_update = SimpleNamespace(
@@ -2733,7 +2862,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
-            return {"type": "text", "text": "\n".join(ctx.resp)}
+            if len(ctx.resp) == 1:
+                return ctx.resp[0]  # envía solo la respuesta directa (texto, foto o video)
+            else:
+                return {"type": "multi", "messages": ctx.resp}
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
@@ -2752,6 +2884,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         except Exception as fallback_error:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
             return {"type": "text", "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
+
 
 
 @api.post("/venom")
@@ -2987,7 +3120,9 @@ async def venom_webhook(req: Request):
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
-    descargar_videos_drive()  # ⬅️ Descarga videos desde Drive al iniciar
+    descargar_videos_drive()          # ⬇️ Descarga los videos (si no existen)
+    descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
+
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
