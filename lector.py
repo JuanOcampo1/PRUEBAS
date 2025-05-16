@@ -1612,35 +1612,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ref_final = est.get("referencia") or est.get("ultimo_modelo", "")
 
         if ref_final:
+            # ── Guardar datos clave ─────────────────────────────────
             est["referencia"] = ref_final
-            modelo = est["referencia"]
-            color = est.get("color", "")
+            est["modelo"]     = ref_final
+            est["color"]      = est.get("color", "")
+            if not est.get("marca"):      # marca por defecto si viene de video
+                est["marca"] = "DS"
 
-            est["modelo"] = modelo
-            est["color"] = color
+            modelo = est["modelo"]
+            color  = est["color"]
 
-            # ✅ Colores equivalentes para alias como celeste ≈ azul
-            def colores_equivalentes(color_base: str):
-                color_base = normalize(color_base)
-                equivalentes = {color_base}
+            # ── Alias de color ─────────────────────────────────────
+            def colores_equivalentes(base: str):
+                b  = normalize(base)
+                eq = {b}
                 for alias, real in color_aliases.items():
-                    if normalize(real) == color_base or normalize(alias) == color_base:
-                        equivalentes.add(normalize(alias))
-                        equivalentes.add(normalize(real))
-                return equivalentes
+                    if normalize(alias) == b or normalize(real) == b:
+                        eq.update({normalize(alias), normalize(real)})
+                return eq
 
             equivalentes = colores_equivalentes(color)
 
-            # ✅ Obtener precio real desde Google Sheets
+            # ── Precio desde Google Sheets (comparación flexible) ──
             precio = next(
-                (i["precio"] for i in inv
-                 if normalize(i["modelo"]) == normalize(modelo)
-                 and normalize(i["color"]) in equivalentes),
+                (row.get("precio") for row in inv
+                 if normalize(row.get("modelo", "")) == normalize(modelo)
+                 and any(eq in normalize(row.get("color", "")) for eq in equivalentes)),
                 None
             )
             est["precio_total"] = int(precio) if precio else 0
 
-            # ✅ Obtener tallas desde Google Sheets usando alias
+            # ── Tallas disponibles usando alias ────────────────────
             tallas = obtener_tallas_por_color_alias(inv, modelo, color)
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
@@ -1652,7 +1654,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        f"📏 Estas son las tallas disponibles para el modelo *{modelo}* color *{color.upper()}*:\n"
+                        f"📏 Estas son las tallas disponibles para el modelo *{modelo}* "
+                        f"color *{color.upper()}*:\n"
                         f"👉 Opciones: {', '.join(tallas)}"
                     ),
                     parse_mode="Markdown"
@@ -1665,11 +1668,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+        #  Si el usuario no especificó un modelo válido
         await ctx.bot.send_message(
             chat_id=cid,
             text="👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*."
         )
         return
+
+
 
 
 
@@ -1729,12 +1735,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+        texto_normalizado = normalize(txt_raw)
 
         # FAQ 1: ¿Cuánto demora el envío?
-        if any(frase in txt for frase in (
-            "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
-            "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
-            "me llega rapido", "llegan rapido"
+        if any(frase in texto_normalizado for frase in (
+            "cuanto demora", "cuanto tarda", "cuanto se demora",
+            "en cuanto llega", "me llega rapido", "llegan rapido"
         )):
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1750,7 +1756,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # FAQ 2: ¿Tienen pago contra entrega?
-        if any(frase in txt for frase in (
+        if any(frase in texto_normalizado for frase in (
             "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
             "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
         )):
@@ -1767,9 +1773,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # FAQ 3: ¿Tienen garantía?
-        if any(frase in txt for frase in (
-            "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
-            "garantía", "garantia", "tienen garantia de fabrica"
+        if any(frase in texto_normalizado for frase in (
+            "tienen garantia", "hay garantia", "garantia", "tienen garantia de fabrica"
         )):
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1784,61 +1789,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # FAQ 4: ¿Cómo sé que no me van a robar?
-        frases_desconfianza = [
-            "no confío", "no confio", "desconfío", "desconfio",
-            "me han robado", "me robaron", "ya me robaron", "me tumbaron",
-            "me estafaron", "ya me estafaron", "me hicieron el robo",
-            "no quiero pagar antes", "no quiero pagar anticipado",
-            "no quiero dar plata antes", "no quiero enviar dinero sin ver",
-            "me da desconfianza", "me da miedo pagar", "no me da confianza",
-            "me han tumbado", "me hicieron fraude", "tengo miedo de pagar",
-            "no tengo seguridad", "prefiero contraentrega", "quiero pagar al recibir",
-            "pago al recibir", "solo contraentrega", "pago cuando llegue",
-            "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue",
-            "me tumbaron una vez", "me jodieron", "ya me tumbaron",
-            "no vuelvo a caer", "ya me pasó una vez", "eso me pasó antes",
-            "no me sale el mensaje", "no me abre el link", "no salta el mensaje",
-            "me da cosa pagar", "no puedo pagar sin saber", "no mando dinero así",
-            "no conozco su tienda", "no estoy seguro", "como sé que es real",
-            "como sé que es confiable", "como saber si es real", "esto es confiable?",
-            "no tengo pruebas", "es seguro esto?", "no me siento cómodo pagando",
-            "mejor contraentrega", "yo solo pago al recibir", "yo no pago antes",
-            "a mí me han estafado", "me estafaron antes", "me robaron antes",
-            "y si no me llega", "y si no llega", "y si me estafan", "y si es falso",
-            "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
-            "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro",
-            "y si es mentira", "y si es estafa", "y si no me mandan nada",
-            "yo no pago sin ver", "yo no mando plata así", "yo no confío en eso",
-            "esto parece raro", "y si no cumplen", "y si no es verdad",
-            "parece una estafa", "se ve raro", "esto huele a estafa", "muy sospechoso",
-            "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
-        ]
-
-        if any(frase in txt_raw.lower() for frase in frases_desconfianza):
+        if any(frase in texto_normalizado for frase in frases_desconfianza):
             video_path = "/var/data/videos/video_confianza.mp4"
 
-            await ctx.client.sendText(
-                cid,
-                "🤝 Entendemos tu preocupación. "
-                "Te compartimos este video para que veas que somos una tienda real y seria."
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
+                parse_mode="Markdown"
             )
 
             if os.path.exists(video_path):
-                await ctx.client.sendFile(
-                    cid,
-                    video_path,
-                    "video_confianza.mp4",
-                    "¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
-                )
+                with open(video_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "video",
+                    "base64": b64,
+                    "mimetype": "video/mp4",
+                    "filename": "video_confianza.mp4",
+                    "text": "¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
+                }
             else:
-                logging.warning(f"⚠️ Video de confianza no encontrado: {video_path}")
-                await ctx.client.sendText(
-                    cid,
-                    "📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!"
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
+                    parse_mode="Markdown"
                 )
 
             await reanudar_fase_actual(cid, ctx, est)
             return
+
 
 
     # FAQ 5: ¿Dónde están ubicados?
