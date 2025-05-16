@@ -1788,7 +1788,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 4: ¿Cómo sé que no me van a robar?
+        # 📦 FAQ 4: Frases comunes de desconfianza (antes del uso)
+        frases_desconfianza = [
+            "no confío", "no confio", "desconfío", "desconfio",
+            "me han robado", "me robaron", "ya me robaron", "me tumbaron",
+            "me estafaron", "ya me estafaron", "me hicieron el robo",
+            "no quiero pagar antes", "no quiero pagar anticipado",
+            "no quiero dar plata antes", "no quiero enviar dinero sin ver",
+            "me da desconfianza", "me da miedo pagar", "no me da confianza",
+            "me han tumbado", "me hicieron fraude", "tengo miedo de pagar",
+            "no tengo seguridad", "prefiero contraentrega", "quiero pagar al recibir",
+            "pago al recibir", "solo contraentrega", "pago cuando llegue",
+            "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue",
+            "me tumbaron una vez", "me jodieron", "ya me tumbaron",
+            "no vuelvo a caer", "ya me pasó una vez", "eso me pasó antes",
+            "no me sale el mensaje", "no me abre el link", "no salta el mensaje",
+            "me da cosa pagar", "no puedo pagar sin saber", "no mando dinero así",
+            "no conozco su tienda", "no estoy seguro", "como sé que es real",
+            "como sé que es confiable", "como saber si es real", "esto es confiable?",
+            "no tengo pruebas", "es seguro esto?", "no me siento cómodo pagando",
+            "mejor contraentrega", "yo solo pago al recibir", "yo no pago antes",
+            "a mí me han estafado", "me estafaron antes", "me robaron antes",
+            "y si no me llega", "y si no llega", "y si me estafan", "y si es falso",
+            "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
+            "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro",
+            "y si es mentira", "y si es estafa", "y si no me mandan nada",
+            "yo no pago sin ver", "yo no mando plata así", "yo no confío en eso",
+            "esto parece raro", "y si no cumplen", "y si no es verdad",
+            "parece una estafa", "se ve raro", "esto huele a estafa", "muy sospechoso",
+            "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
+        ]
+
         if any(frase in texto_normalizado for frase in frases_desconfianza):
             video_path = "/var/data/videos/video_confianza.mp4"
 
