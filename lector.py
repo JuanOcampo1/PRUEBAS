@@ -1388,9 +1388,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
 
         await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+        est["color"] = color  # ✅ Guardar el color para el siguiente paso del flujo
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
         return
+
     
     # 🔄 Mostrar todos los colores del modelo (solo si está en fase inicial)
     if est.get("fase") in ("inicio", "haciendo_pedido"):
