@@ -1174,18 +1174,73 @@ async def enviar_video_referencia(cid, ctx, referencia):
 
 
 # ────────────────────────────────────────────────────────────
-# FUNCIÓN AUXILIAR – Detectar color en texto
+# FUNCIÓN AUXILIAR – Detectar color en texto con alias y video
 # ────────────────────────────────────────────────────────────
+
+# 📼 Asociación de colores y modelos por video específico
+colores_video_modelos = {
+    "referencias": {
+        "verde": ["279", "305"],
+        "azul": ["279", "304"],
+        "fucsia": ["279"],
+        "amarillo": ["279"],
+        "naranja": ["279", "304"],
+        "negro": ["279", "304"],
+        "blanco": ["279", "305"],
+        "rojo": ["279"],
+        "aqua": ["305"],
+    }
+}
+
+# 🎨 Sinónimos y variantes comunes de clientes
+color_aliases = {
+    "rosado": "fucsia",
+    "rosa": "fucsia",
+    "fucsias": "fucsia",
+    "celeste": "azul",
+    "azul cielo": "aqua",
+    "azul clarito": "aqua",
+    "azul claro": "aqua",
+    "azulito": "aqua",
+    "azules": "azul",
+    "verdes": "verde",
+    "amarillas": "amarillo",
+    "blancos": "blanco",
+    "negros": "negro",
+    "rojos": "rojo",
+    "naranjas": "naranja",
+}
+
+# 🧠 Detección especial para colores por video
+def detectar_color_video(texto: str) -> str:
+    texto = texto.lower()
+    texto = texto.replace("las ", "").replace("los ", "").strip()
+
+    # Aplicar alias conocidos
+    for palabra, real_color in color_aliases.items():
+        if palabra in texto:
+            return real_color
+
+    # Fallback directo
+    for color in colores_video_modelos.get("referencias", {}):
+        if color in texto:
+            return color
+
+    return ""
+
+# 🎨 Fallback general para otros flujos o videos
 def detectar_color(texto: str) -> str:
     colores = [
         "negro", "blanco", "rojo", "azul", "amarillo", "verde",
         "rosado", "gris", "morado", "naranja", "café", "beige",
-        "neón", "limón"
+        "neón", "limón", "fucsia", "celeste", "aqua"
     ]
+    texto = texto.lower()
     for c in colores:
-        if c in texto.lower():
+        if c in texto:
             return c
     return ""
+
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1282,23 +1337,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
     if est.get("fase") == "esperando_color_post_video":
-        color = detectar_color(txt)
+        video_activo = est.get("video_activo", "").replace(".mp4", "").lower()
+
+        if video_activo == "referencias":
+            color = detectar_color_video(txt)
+            modelos_permitidos = colores_video_modelos.get(video_activo, {}).get(color, [])
+        else:
+            color = detectar_color(txt)
+            modelos_permitidos = []
+
         if not color:
             await ctx.bot.send_message(cid, "👀 No entendí el color. ¿Puedes repetirlo?")
             return
 
-        ruta = "/var/data/modelos_video"  # ✅ CORREGIDO: antes era /tmp/modelos_video
+        if video_activo == "referencias" and not modelos_permitidos:
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos de color *{color.upper()}* para ese video.")
+            return
+
+        ruta = "/var/data/modelos_video"
         if not os.path.exists(ruta):
             await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
             return
 
         coincidencias = [
             f for f in os.listdir(ruta)
-            if f.lower().endswith(".jpg") and color in f.lower()
+            if f.lower().endswith(".jpg")
+            and color in f.lower()
+            and (not modelos_permitidos or any(modelo in f for modelo in modelos_permitidos))
         ]
 
         if not coincidencias:
-            await ctx.bot.send_message(cid, f"😕 No encontré modelos en color {color.upper()}.")
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos con ese color.")
             return
 
         for archivo in coincidencias:
@@ -1319,6 +1388,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
         return
+
 
 
 
