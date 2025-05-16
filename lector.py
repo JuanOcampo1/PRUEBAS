@@ -2737,6 +2737,8 @@ async def manejar_catalogo(update, ctx):
     return False
 
 
+import base64  # Asegúrate de que esté arriba del archivo
+
 # ─────────────────────────────────────────────────────────────
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
@@ -2760,6 +2762,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     if msg_id:
         ultimo_msg[cid] = {"id": msg_id, "t": now}
 
+    # Función auxiliar para codificar imagen como base64
+    def codificar_base64(path, tipo='image/jpeg'):
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:{tipo};base64,{b64}"
+
     # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw):
@@ -2776,11 +2784,18 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             })
 
         async def bot_send_photo(self, chat_id, photo, caption=None, **kw):
-            self.resp.append({
-                "type": "photo",
-                "path": photo.name,
-                "text": caption or ""
-            })
+            try:
+                base64_img = codificar_base64(photo.name)
+                self.resp.append({
+                    "type": "photo",
+                    "base64": base64_img,
+                    "text": caption or ""
+                })
+            except Exception as e:
+                self.resp.append({
+                    "type": "text",
+                    "text": f"❌ Error cargando imagen: {e}"
+                })
 
     ctx = DummyCtx(resp=[])
     ctx.bot = SimpleNamespace(
@@ -2891,7 +2906,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         except Exception as fallback_error:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
             return {"type": "text", "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
-
 
 
 @api.post("/venom")
