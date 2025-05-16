@@ -1149,6 +1149,16 @@ def generate_sale_id() -> str:
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
+async def enviar_sticker(ctx, cid, nombre_archivo):
+    ruta = os.path.join("/var/data/stickers", nombre_archivo)
+    if os.path.exists(ruta):
+        try:
+            await ctx.client.sendImageAsSticker(cid, ruta)
+            logging.info(f"✅ Sticker enviado: {ruta}")
+        except Exception as e:
+            logging.warning(f"⚠️ No se pudo enviar el sticker {nombre_archivo}: {e}")
+    else:
+        logging.warning(f"⚠️ Sticker no encontrado: {ruta}")
 
 # ────────────────────────────────────────────────────────────
 # FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM) CON LOGS DETALLADOS
@@ -1307,22 +1317,29 @@ def detectar_color(texto: str) -> str:
             return c
     return ""
 
-def obtener_tallas_por_color_alias(inventario, modelo, color_real):
-    """Busca tallas para un modelo dado y color, incluyendo sus alias inversos."""
-    colores_validos = [color_real] + [
-        alias for alias, real in color_aliases.items()
-        if real == color_real
-    ]
+def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
+    color_usuario = normalize(color_usuario)
+    
+    # 🔁 Crear set con todos los colores equivalentes: color original + sinónimos
+    colores_equivalentes = {color_usuario}
+    for alias, real in color_aliases.items():
+        if normalize(alias) == color_usuario or normalize(real) == color_usuario:
+            colores_equivalentes.add(normalize(alias))
+            colores_equivalentes.add(normalize(real))
 
+    tallas = set()
     for item in inventario:
-        if (
-            normalize(item["modelo"]) == normalize(modelo) and
-            normalize(item["stock"]) == "si" and
-            normalize(item["color"]) in colores_validos
-        ):
-            return item["tallas"].split(",") if "tallas" in item else []
+        if normalize(item.get("modelo", "")) != normalize(modelo):
+            continue
+        if item.get("stock", "").lower() != "si":
+            continue
 
-    return []
+        color_item = normalize(item.get("color", ""))
+        if any(color_equiv in color_item for color_equiv in colores_equivalentes):
+            tallas.add(str(item.get("talla", "")))
+
+    return sorted(tallas)
+
 
 # --------------------------------------------------------------------------------------------------
 
@@ -2492,9 +2509,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
         )
 
+        await enviar_sticker(ctx, cid, "sticker_fin_de_compra_gracias.webp")
+
         reset_estado(cid)
         estado_usuario.pop(cid, None)
         return
+
 
 
 
@@ -3410,7 +3430,7 @@ async def venom_webhook(req: Request):
 if __name__ == "__main__":
     descargar_videos_drive()          # ⬇️ Descarga los videos (si no existen)
     descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
-
+    descargar_stickers_drive()
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
