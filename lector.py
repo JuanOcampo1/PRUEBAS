@@ -79,6 +79,59 @@ def get_drive_service():
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
     return build("drive", "v3", credentials=creds)
+# ─── Descarga del video de confianza desde Drive ─────────────────────────────
+CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
+
+def descargar_video_confianza():
+    """
+    Descarga el archivo .mp4 desde la carpeta 'Video de confianza' en Google Drive.
+    Guarda el archivo en /var/data/videos/video_confianza.mp4 si aún no existe.
+    """
+    try:
+        print(">>> descargar_video_confianza() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/videos", exist_ok=True)
+
+        logging.info("📂 [Video Confianza] Iniciando descarga desde Drive…")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_VIDEO_CONFIANZA_DRIVE}")
+
+        # Buscar archivo .mp4 en la carpeta
+        archivos = service.files().list(
+            q=f"'{CARPETA_VIDEO_CONFIANZA_DRIVE}' in parents and mimeType='video/mp4' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivos:
+            logging.warning("⚠️ No se encontró ningún video .mp4 en la carpeta de confianza.")
+            return
+
+        archivo = archivos[0]
+        nombre_archivo = "video_confianza.mp4"
+        ruta_destino = os.path.join("/var/data/videos", nombre_archivo)
+
+        if os.path.exists(ruta_destino):
+            logging.info(f"📦 Ya existe: {nombre_archivo} — se omite descarga.")
+            return
+
+        logging.info(f"⬇️ Descargando video: {nombre_archivo}")
+        request = service.files().get_media(fileId=archivo["id"])
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(ruta_destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Video guardado: {ruta_destino}")
+        print(">>> descargar_video_confianza() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
+        logging.error(f"❌ Error descargando video de confianza: {e}")
 
 # ─── Descarga de stickers organizados por subcarpetas ───────────────────────
 CARPETA_STICKERS_DRIVE = "1mYpTq98rli3_hTXzvfCj6CgcGhrYZwCh"  # Carpeta 'Stickers'
@@ -1256,17 +1309,24 @@ async def enviar_video_referencia(cid, ctx, referencia):
 # 📼 Asociación de colores y modelos por video específico
 colores_video_modelos = {
     "referencias": {
-        "verde": ["279", "305"],
-        "azul": ["279", "304"],
+        "verde":  ["279", "305"],
+        "azul":   ["279", "304", "305"],   # 👈 305 también es “azul”
         "fucsia": ["279"],
         "amarillo": ["279"],
         "naranja": ["279", "304"],
         "negro": ["279", "304"],
         "blanco": ["279", "305"],
         "rojo": ["279"],
-        "aqua": ["305"],
+        "aqua":  ["305"],
     }
 }
+
+# ↔️  Alias bidireccional esencial (aqua ⇒ azul y vice-versa)
+color_aliases.update({
+    "aqua": "azul",      # ahora “aqua” se entiende como “azul”
+    "turquesa": "aqua",
+})
+
 
 # 🎨 Sinónimos y variantes comunes de clientes
 color_aliases = {
@@ -1543,7 +1603,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 🟦 El cliente ya vio los modelos y confirma: "quiero los 279", "sí esos", etc.
     if est.get("fase") == "esperando_modelo_elegido":
         referencia_mencionada = re.search(r"\b(279|304|305)\b", txt)
-        afirmacion = any(palabra in txt for palabra in ("sí", "s", "esos", "quiero", "me gustaron", "me sirven", "ese", "perfecto", "dale"))
+        afirmacion = any(palabra in txt for palabra in (
+            "sí", "s", "esos", "quiero", "me gustaron", "me sirven",
+            "ese", "perfecto", "dale", "me encanta", "lo quiero"
+        ))
 
         ref_final = ""
         if referencia_mencionada:
@@ -1558,16 +1621,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             est["modelo"] = modelo
             est["color"] = color
+
+            # ✅ Colores equivalentes para alias como celeste ≈ azul
+            def colores_equivalentes(color_base: str):
+                color_base = normalize(color_base)
+                equivalentes = {color_base}
+                for alias, real in color_aliases.items():
+                    if normalize(real) == color_base or normalize(alias) == color_base:
+                        equivalentes.add(normalize(alias))
+                        equivalentes.add(normalize(real))
+                return equivalentes
+
+            equivalentes = colores_equivalentes(color)
+
+            # ✅ Obtener precio real desde Google Sheets
             precio = next(
-                (i["precio"] for i in inv if
-                 normalize(i["modelo"]) == normalize(modelo) and
-                 normalize(i["color"]) == normalize(color)),
+                (i["precio"] for i in inv
+                 if normalize(i["modelo"]) == normalize(modelo)
+                 and normalize(i["color"]) in equivalentes),
                 None
             )
             est["precio_total"] = int(precio) if precio else 0
 
+            # ✅ Obtener tallas desde Google Sheets usando alias
             tallas = obtener_tallas_por_color_alias(inv, modelo, color)
-
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
@@ -1585,11 +1662,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             else:
-                await ctx.bot.send_message(cid, f"❌ No hay tallas disponibles para el modelo {modelo} en color {color.upper()}.")
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=f"❌ No hay tallas disponibles para el modelo {modelo} en color {color.upper()}."
+                )
                 return
 
-        await ctx.bot.send_message(cid, "👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*.")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*."
+        )
         return
+
 
 
 
@@ -1649,7 +1733,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
-        # FAQ 1: ¿Cuánto demora el envío?
+        # FAQ 1: ¿Cuánto demora el envío?
         if any(frase in txt for frase in (
             "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
             "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
@@ -1668,7 +1752,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 2: ¿Tienen pago contra entrega?
+        # FAQ 2: ¿Tienen pago contra entrega?
         if any(frase in txt for frase in (
             "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
             "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
@@ -1685,7 +1769,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 3: ¿Tienen garantía?
+        # FAQ 3: ¿Tienen garantía?
         if any(frase in txt for frase in (
             "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
             "garantía", "garantia", "tienen garantia de fabrica"
@@ -1702,7 +1786,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 4: ¿Cómo sé que no me van a robar?
+        # FAQ 4: ¿Cómo sé que no me van a robar?
         frases_desconfianza = [
             "no confío", "no confio", "desconfío", "desconfio",
             "me han robado", "me robaron", "ya me robaron", "me tumbaron",
@@ -1733,24 +1817,32 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
         ]
 
-        if any(frase in txt for frase in frases_desconfianza):
-            video_url = "https://tudominio.com/videos/video_confianza.mp4"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🤝 Entendemos tu preocupación. "
-                    "Te compartimos este video para que veas que somos una tienda real y seria."
-                ),
-                parse_mode="Markdown"
+        if any(frase in txt_raw.lower() for frase in frases_desconfianza):
+            video_path = "/var/data/videos/video_confianza.mp4"
+
+            await ctx.client.sendText(
+                cid,
+                "🤝 Entendemos tu preocupación. "
+                "Te compartimos este video para que veas que somos una tienda real y seria."
             )
-            await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-            await ctx.bot.send_video(
-                chat_id=cid,
-                video=video_url,
-                caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
-            )
+
+            if os.path.exists(video_path):
+                await ctx.client.sendFile(
+                    cid,
+                    video_path,
+                    "video_confianza.mp4",
+                    "¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
+                )
+            else:
+                logging.warning(f"⚠️ Video de confianza no encontrado: {video_path}")
+                await ctx.client.sendText(
+                    cid,
+                    "📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!"
+                )
+
             await reanudar_fase_actual(cid, ctx, est)
             return
+
 
     # FAQ 5: ¿Dónde están ubicados?
     if est.get("fase") not in ("editando_dato", "esperando_direccion", "confirmar_datos_guardados"):
@@ -3431,6 +3523,8 @@ if __name__ == "__main__":
     descargar_videos_drive()          # ⬇️ Descarga los videos (si no existen)
     descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
+    descargar_video_confianza()
+ 
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
