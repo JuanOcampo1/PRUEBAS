@@ -1287,7 +1287,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(cid, "👀 No entendí el color. ¿Puedes repetirlo?")
             return
 
-        ruta = "/tmp/modelos_video"
+        ruta = "/var/data/modelos_video"  # ✅ CORREGIDO: antes era /tmp/modelos_video
+        if not os.path.exists(ruta):
+            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+            return
+
         coincidencias = [
             f for f in os.listdir(ruta)
             if f.lower().endswith(".jpg") and color in f.lower()
@@ -1315,6 +1319,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
         return
+
 
 
     # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
