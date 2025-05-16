@@ -79,6 +79,72 @@ def get_drive_service():
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
     return build("drive", "v3", credentials=creds)
+
+# ─── Descarga de stickers organizados por subcarpetas ───────────────────────
+CARPETA_STICKERS_DRIVE = "1mYpTq98rli3_hTXzvfCj6CgcGhrYZwCh"  # Carpeta 'Stickers'
+
+def descargar_stickers_drive():
+    """
+    Descarga stickers desde subcarpetas de 'Stickers' en Google Drive.
+    Cada subcarpeta (ej: 'Sticker bienvenida') se guarda como prefijo del nombre del archivo.
+    Ejemplo: 'Sticker bienvenida/sticker1.webp' → /var/data/stickers/sticker_bienvenida_sticker1.webp
+    """
+    try:
+        print(">>> descargar_stickers_drive() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/stickers", exist_ok=True)
+
+        logging.info("📂 [Stickers] Descargando desde subcarpetas temáticas…")
+        logging.info(f"🆔 Carpeta raíz: {CARPETA_STICKERS_DRIVE}")
+
+        # Buscar subcarpetas dentro de la carpeta 'Stickers'
+        subcarpetas = service.files().list(
+            q=f"'{CARPETA_STICKERS_DRIVE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)"
+        ).execute().get("files", [])
+
+        for sub in subcarpetas:
+            nombre_subcarpeta = sub["name"].lower().replace(" ", "_")  # Ej: 'Sticker bienvenida' → 'sticker_bienvenida'
+            id_subcarpeta = sub["id"]
+
+            logging.info(f"🔎 Buscando en subcarpeta: {nombre_subcarpeta}")
+
+            archivos = service.files().list(
+                q=f"'{id_subcarpeta}' in parents and mimeType='image/webp' and trashed = false",
+                fields="files(id, name)"
+            ).execute().get("files", [])
+
+            for archivo in archivos:
+                nombre_archivo_original = archivo["name"]
+                nombre_archivo_local = f"{nombre_subcarpeta}_{nombre_archivo_original}"
+                ruta_destino = os.path.join("/var/data/stickers", nombre_archivo_local)
+
+                if os.path.exists(ruta_destino):
+                    logging.info(f"📦 Ya existe: {nombre_archivo_local} — omitiendo descarga.")
+                    continue
+
+                logging.info(f"⬇️ Descargando sticker: {nombre_archivo_local}")
+                request = service.files().get_media(fileId=archivo["id"])
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+
+                with open(ruta_destino, "wb") as f:
+                    f.write(buffer.getvalue())
+
+                logging.info(f"✅ Guardado: {ruta_destino}")
+
+        logging.info("🎉 Stickers descargados con éxito.")
+        print(">>> descargar_stickers_drive() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_stickers_drive:", e)
+        logging.error(f"❌ Error al descargar stickers: {e}")
+
+
 # ─── Descarga de imágenes de catálogo desde Drive ───────────────────────
 CARPETA_CATALOGO_DRIVE = "1_liZvzlyNj2P8koFU4fgFp5X8icUh_ZA"  # Carpeta principal
 
@@ -1241,6 +1307,22 @@ def detectar_color(texto: str) -> str:
             return c
     return ""
 
+def obtener_tallas_por_color_alias(inventario, modelo, color_real):
+    """Busca tallas para un modelo dado y color, incluyendo sus alias inversos."""
+    colores_validos = [color_real] + [
+        alias for alias, real in color_aliases.items()
+        if real == color_real
+    ]
+
+    for item in inventario:
+        if (
+            normalize(item["modelo"]) == normalize(modelo) and
+            normalize(item["stock"]) == "si" and
+            normalize(item["color"]) in colores_validos
+        ):
+            return item["tallas"].split(",") if "tallas" in item else []
+
+    return []
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1341,7 +1423,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         if video_activo == "referencias":
             color = detectar_color_video(txt)
-            modelos_permitidos = colores_video_modelos.get(video_activo, {}).get(color, [])
+
+            # ✅ NUEVO: incluir alias que apuntan al mismo color
+            colores_equivalentes = [color] + [k for k, v in color_aliases.items() if v == color]
+            modelos_permitidos = []
+            for c in colores_equivalentes:
+                modelos_permitidos.extend(colores_video_modelos.get(video_activo, {}).get(c, []))
         else:
             color = detectar_color(txt)
             modelos_permitidos = []
@@ -1392,6 +1479,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
         return
+
 
     
     # 🔄 Mostrar todos los colores del modelo (solo si está en fase inicial)
@@ -1451,7 +1539,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             modelo = est["referencia"]
             color = est.get("color", "")
 
-            tallas = obtener_tallas_por_color(inv, modelo, color)
+            est["modelo"] = modelo
+            est["color"] = color
+            precio = next(
+                (i["precio"] for i in inv if
+                 normalize(i["modelo"]) == normalize(modelo) and
+                 normalize(i["color"]) == normalize(color)),
+                None
+            )
+            est["precio_total"] = int(precio) if precio else 0
+
+            tallas = obtener_tallas_por_color_alias(inv, modelo, color)
+
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
