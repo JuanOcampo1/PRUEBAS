@@ -1359,10 +1359,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
             return
 
+        # 📁 Buscar imágenes que contengan el color o cualquier alias relacionado
+        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
+
         coincidencias = [
             f for f in os.listdir(ruta)
             if f.lower().endswith(".jpg")
-            and color in f.lower()
+            and any(alias in f.lower() for alias in aliases_del_color)
             and (not modelos_permitidos or any(modelo in f for modelo in modelos_permitidos))
         ]
 
@@ -1387,6 +1390,87 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
+        return
+    
+    # 🔄 Mostrar todos los colores del modelo (solo si está en fase inicial)
+    if est.get("fase") in ("inicio", "haciendo_pedido"):
+        match_modelo = re.search(r"\b(279|304|305)\b", txt)
+        if match_modelo:
+            modelo = str(match_modelo.group(1))
+            ruta = "/var/data/modelos_colores"  # Asegúrate que este es el path correcto
+
+            if not os.path.exists(ruta) or not os.listdir(ruta):
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+                return
+
+            imagenes_modelo = [
+                f for f in os.listdir(ruta)
+                if f.lower().endswith((".jpg", ".jpeg", ".png")) and modelo in f
+            ]
+
+            if not imagenes_modelo:
+                await ctx.bot.send_message(cid, f"😕 No encontré imágenes del modelo {modelo}.")
+                return
+
+            for archivo in imagenes_modelo:
+                try:
+                    path = os.path.join(ruta, archivo)
+                    color = archivo.replace(".jpg", "").replace(".jpeg", "").replace(".png", "")
+                    color = color.replace("_", " ").replace(modelo, "").strip()
+                    await ctx.bot.send_photo(
+                        chat_id=cid,
+                        photo=open(path, "rb"),
+                        caption=f"📸 Modelo *{modelo}* color *{color}*",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Error enviando imagen: {e}")
+                    await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
+
+            await ctx.bot.send_message(cid, "🧐 ¿Cuál color de este modelo te interesa?")
+            est["fase"] = "esperando_color"
+            est["referencia"] = modelo
+            estado_usuario[cid] = est
+            return
+
+    # 🟦 El cliente ya vio los modelos y confirma: "quiero los 279", "sí esos", etc.
+    if est.get("fase") == "esperando_modelo_elegido":
+        referencia_mencionada = re.search(r"\b(279|304|305)\b", txt)
+        afirmacion = any(palabra in txt for palabra in ("sí", "s", "esos", "quiero", "me gustaron", "me sirven", "ese", "perfecto", "dale"))
+
+        ref_final = ""
+        if referencia_mencionada:
+            ref_final = referencia_mencionada.group(1)
+        elif afirmacion:
+            ref_final = est.get("referencia") or est.get("ultimo_modelo", "")
+
+        if ref_final:
+            est["referencia"] = ref_final
+            modelo = est["referencia"]
+            color = est.get("color", "")
+
+            tallas = obtener_tallas_por_color(inv, modelo, color)
+            if isinstance(tallas, (int, float, str)):
+                tallas = [str(tallas)]
+
+            if tallas:
+                est["fase"] = "esperando_talla"
+                estado_usuario[cid] = est
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        f"📏 Estas son las tallas disponibles para el modelo *{modelo}* color *{color.upper()}*:\n"
+                        f"👉 Opciones: {', '.join(tallas)}"
+                    ),
+                    parse_mode="Markdown"
+                )
+                return
+            else:
+                await ctx.bot.send_message(cid, f"❌ No hay tallas disponibles para el modelo {modelo} en color {color.upper()}.")
+                return
+
+        await ctx.bot.send_message(cid, "👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*.")
         return
 
 
