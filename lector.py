@@ -3077,16 +3077,21 @@ async def venom_webhook(req: Request):
                 logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
                 reply = await procesar_wa(cid, body)
 
-                # A) Dict directo (video, audio, photo, multi)
-                if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image", "photo", "multi"):
+                # A) Dict directo válido
+                if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image", "photo", "multi", "text"):
                         return JSONResponse(reply)
 
-                # B) Lista → convertir en multi
+                # B) Lista → convertir a multi
                 if isinstance(reply, list):
                         return JSONResponse({"type": "multi", "messages": reply})
 
-                # C) Texto simple
-                return JSONResponse({"type": "text", "text": reply})
+                # C) Texto plano (evita text anidado)
+                if isinstance(reply, str):
+                        return JSONResponse({"type": "text", "text": reply})
+
+                # D) Seguridad: si vino algo raro
+                return JSONResponse({"type": "text", "text": "⚠️ Error inesperado. Intenta de nuevo."})
+
 
 
         # 🎙️ AUDIO
