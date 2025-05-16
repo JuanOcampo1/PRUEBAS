@@ -1309,24 +1309,17 @@ async def enviar_video_referencia(cid, ctx, referencia):
 # 📼 Asociación de colores y modelos por video específico
 colores_video_modelos = {
     "referencias": {
-        "verde":  ["279", "305"],
-        "azul":   ["279", "304", "305"],   # 👈 305 también es “azul”
-        "fucsia": ["279"],
+        "verde":    ["279", "305"],
+        "azul":     ["279", "304", "305"],  # 305 también como azul
+        "fucsia":   ["279"],
         "amarillo": ["279"],
-        "naranja": ["279", "304"],
-        "negro": ["279", "304"],
-        "blanco": ["279", "305"],
-        "rojo": ["279"],
-        "aqua":  ["305"],
+        "naranja":  ["279", "304"],
+        "negro":    ["279", "304"],
+        "blanco":   ["279", "305"],
+        "rojo":     ["279"],
+        "aqua":     ["305"],
     }
 }
-
-# ↔️  Alias bidireccional esencial (aqua ⇒ azul y vice-versa)
-color_aliases.update({
-    "aqua": "azul",      # ahora “aqua” se entiende como “azul”
-    "turquesa": "aqua",
-})
-
 
 # 🎨 Sinónimos y variantes comunes de clientes
 color_aliases = {
@@ -1345,6 +1338,8 @@ color_aliases = {
     "negros": "negro",
     "rojos": "rojo",
     "naranjas": "naranja",
+    "aqua": "azul",        # 👈 alias agregado correctamente ahora
+    "turquesa": "aqua"
 }
 
 # 🧠 Detección especial para colores por video
@@ -1377,6 +1372,7 @@ def detectar_color(texto: str) -> str:
             return c
     return ""
 
+# 👟 Obtener tallas desde inventario, respetando alias del color
 def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
     color_usuario = normalize(color_usuario)
     
@@ -1399,6 +1395,7 @@ def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
             tallas.add(str(item.get("talla", "")))
 
     return sorted(tallas)
+
 
 
 # --------------------------------------------------------------------------------------------------
