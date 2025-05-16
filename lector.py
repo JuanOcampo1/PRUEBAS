@@ -3073,14 +3073,21 @@ async def venom_webhook(req: Request):
 
         # 💬 TEXTO
         elif mtype == "chat":
-            fase_actual = estado_usuario.get(cid, {}).get("fase", "")
-            logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
-            reply = await procesar_wa(cid, body)
+                fase_actual = estado_usuario.get(cid, {}).get("fase", "")
+                logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
+                reply = await procesar_wa(cid, body)
 
-            if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image"):
-                return JSONResponse(reply)
+                # A) Dict directo (video, audio, photo, multi)
+                if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image", "photo", "multi"):
+                        return JSONResponse(reply)
 
-            return JSONResponse({"type": "text", "text": reply} if isinstance(reply, str) else reply)
+                # B) Lista → convertir en multi
+                if isinstance(reply, list):
+                        return JSONResponse({"type": "multi", "messages": reply})
+
+                # C) Texto simple
+                return JSONResponse({"type": "text", "text": reply})
+
 
         # 🎙️ AUDIO
         elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
