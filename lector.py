@@ -1500,25 +1500,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ref = normalize(txt_raw)
         logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
 
+        # Verificar si es una referencia válida de video
+        referencias_validas = {
+            "261", "ds 261", "277", "ds 277", "303", "ds 303",
+            "295", "ds 295", "299", "ds 299",
+            "279", "ds 279", "304", "ds 304", "305", "ds 305",
+            "niño", "niños", "kids", "infantil", "promo", "descuento", "descuentos"
+        }
+
+        if ref not in referencias_validas:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Esa referencia no la reconozco como un video. Si querías continuar tu compra, dime el modelo o mándame una imagen."
+            )
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
+            return
+
         video_respuesta = await enviar_video_referencia(cid, ctx, ref)
         logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
 
         if isinstance(video_respuesta, dict):
-            # ✅ IMPORTANTE: guardar fase ANTES del return para WhatsApp (Venom)
-            est["video_activo"] = "referencia.mp4"  # o asigna según ref si quieres más precisión
+            est["video_activo"] = ref
             est["fase"] = "esperando_color_post_video"
             estado_usuario[cid] = est
-            logging.info("[RESPONDER] ✓ Dict video recibido – se devolverá al webhook")
             return video_respuesta
 
-        if video_respuesta:
-            est["video_activo"] = str(video_respuesta)  # por ejemplo: "referencia.mp4"
-            est["fase"] = "esperando_color_post_video"
-        else:
-            est["fase"] = "inicio"  # si no se reconoce el video
-
+        # Si hubo error o el video no existe
+        est["fase"] = "inicio"
         estado_usuario[cid] = est
         return
+
 
     # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
     if est.get("fase") == "esperando_color_post_video":
@@ -2093,6 +2105,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
         if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
+
+            # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar datos
+            if est.get("talla"):
+                est["fase"] = "esperando_talla"
+                # Simula respuesta del cliente para que entre directo al bloque de talla
+                # Esto permite que el bloque de "esperando_talla" se ejecute automáticamente
+                return await procesar_wa(cid, "sí")
+
+            # 🔁 Si aún no tiene talla, se comporta como antes
             est["fase"] = "esperando_talla"
             tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             if isinstance(tallas, (int, float, str)):
@@ -2101,13 +2122,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    "Tenemos las siguientes tallas disponibles para el modelo 279 color VERDE NEON:\n\n"
+                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
                     f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
                     "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
                 ),
                 parse_mode="Markdown"
             )
             return
+
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -2116,6 +2138,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
+
 
 
     # 🛒 Flujo manual si está buscando modelo
@@ -2180,13 +2203,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 👟 Elegir talla
+    # 👟 Elegir talla (texto directo o confirmación de lengüeta)
     if est.get("fase") == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
         if isinstance(tallas, (int, float, str)):
             tallas = [str(tallas)]
 
-        talla_detectada = detectar_talla(txt_raw, tallas)
+        # 🟢 1. Si ya hay una talla detectada (por imagen) y cliente confirma con "sí"
+        if est.get("talla") and any(p in txt for p in ("sí", "si", "s", "dale", "claro", "continuar", "comprar", "vamos")):
+            talla_detectada = est["talla"]
+
+        # 🟡 2. Si escribió la talla manualmente
+        else:
+            talla_detectada = detectar_talla(txt_raw, tallas)
 
         if talla_detectada:
             est["talla"] = talla_detectada
@@ -2242,15 +2271,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             # 🧾 No hay cliente guardado → continuar normal
             est["fase"] = "esperando_nombre"
+            estado_usuario[cid] = est
             await ctx.bot.send_message(
                 chat_id=cid,
                 text="¿Tu nombre completo para el pedido?",
                 parse_mode="Markdown"
             )
-            estado_usuario[cid] = est
             return
 
-        # Si no se detecta talla, mostrar las tallas disponibles + pedir imagen
+        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
@@ -3393,21 +3422,23 @@ async def venom_webhook(req: Request):
                     if talla_detectada:
                         est["talla"] = talla_detectada
                         estado_usuario[cid] = est
-                        return {
+                        return JSONResponse({
                             "type": "text",
-                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?"
-                        }
+                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
+                            "parse_mode": "Markdown"
+                        })
                     else:
-                        return {
+                        return JSONResponse({
                             "type": "text",
                             "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
-                        }
+                        })
                 except Exception as e:
                     logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
-                    return {
+                    return JSONResponse({
                         "type": "text",
                         "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
-                    }
+                    })
+
 
 
 
