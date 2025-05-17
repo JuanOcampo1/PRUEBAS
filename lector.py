@@ -65,6 +65,55 @@ logging.basicConfig(level=logging.INFO,
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
+
+
+def guardar_en_pedidos(memoria_cliente: dict, cid: str, estado: str, numero_venta: int = 0):
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+
+    sheet = client.open("PEDIDOS").worksheet("PEDIDOS")
+
+    fila = [
+        numero_venta or "",
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        memoria_cliente.get("nombre", ""),
+        memoria_cliente.get("cedula", ""),
+        cid,
+        memoria_cliente.get("modelo", ""),
+        memoria_cliente.get("color", ""),
+        memoria_cliente.get("talla", ""),
+        memoria_cliente.get("correo", ""),
+        memoria_cliente.get("pago", ""),
+        memoria_cliente.get("fase", ""),
+        estado  # 👈 acá entra la etiqueta dinámica como "📍 Dirección confirmada"
+    ]
+    sheet.append_row(fila)
+
+def guardar_en_pendientes(dato: dict):
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+
+    sheet = client.open("PEDIDOS").worksheet("PENDIENTES")
+
+    fila = [
+        dato.get("fecha", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        dato.get("nombre", ""),
+        dato.get("telefono", ""),
+        dato.get("modelo", ""),
+        dato.get("dia_hora", "")
+    ]
+    sheet.append_row(fila)
+
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
     """
@@ -78,7 +127,72 @@ def get_drive_service():
         "service_account.json",
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
+ 
     return build("drive", "v3", credentials=creds)
+
+CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
+
+def descargar_audios_bienvenida_drive():
+    """
+    Descarga audios desde la subcarpeta 'BIENVENIDA' dentro de la carpeta 'Audios' en Google Drive.
+    Guarda los archivos en: /var/data/audios/bienvenida/
+    """
+    try:
+        print(">>> descargar_audios_bienvenida_drive() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/audios/bienvenida", exist_ok=True)
+
+        logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
+        logging.info(f"🆔 Carpeta raíz: {CARPETA_AUDIOS_DRIVE}")
+
+        # Buscar subcarpeta 'BIENVENIDA'
+        subfolder = service.files().list(
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not subfolder:
+            logging.warning("❌ No se encontró la subcarpeta 'BIENVENIDA'.")
+            return
+
+        subfolder_id = subfolder[0]["id"]
+
+        # Buscar archivos de audio en la subcarpeta
+        audios = service.files().list(
+            q=f"'{subfolder_id}' in parents and mimeType contains 'audio/' and trashed = false",
+            fields="files(id, name)"
+        ).execute().get("files", [])
+
+        for audio in audios:
+            nombre_archivo = audio["name"]
+            ruta_destino = os.path.join("/var/data/audios/bienvenida", nombre_archivo)
+
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre_archivo} — omitiendo descarga.")
+                continue
+
+            logging.info(f"⬇️ Descargando audio: {nombre_archivo}")
+            request = service.files().get_media(fileId=audio["id"])
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
+
+            logging.info(f"✅ Guardado: {ruta_destino}")
+
+        logging.info("🎧 Audios de bienvenida descargados con éxito.")
+        print(">>> descargar_audios_bienvenida_drive() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
+        logging.error(f"❌ Error al descargar audios de bienvenida: {e}")
+
 # ─── Descarga del video de confianza desde Drive ─────────────────────────────
 CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
 
@@ -676,14 +790,32 @@ SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
-WELCOME_TEXT = (
-    f"¡Bienvenido a {NOMBRE_NEGOCIO}!\n\n"
-    "Si tienes una foto puedes enviarla\n"
-    "Si tienes numero de referencia enviamelo\n"
-    "Puedes enviarme la foto del pedido\n"
-    "Te gustaria ver unos videos de nuestras referencias👟?\n"
-    "Cuéntame sin ningún problema 😀"
-)
+async def enviar_welcome(cid, ctx):
+    try:
+        await ctx.bot.send_audio(
+            chat_id=cid,
+            audio=open("/var/data/audios/bienvenida/bienvenida1.mp3", "rb"),
+            caption="🎧 Escucha este audio de bienvenida.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logging.error(f"❌ No se pudo enviar el audio de bienvenida: {e}")
+
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text=(
+            "👇🏻 *AQUÍ ESTÁ EL CATÁLOGO* 🆕\n"
+            "Sigue este enlace para ver la ultima colección 👟 X💯:\n"
+            "https://wa.me/c/573007607245"
+        ),
+        parse_mode="Markdown"
+    )
+
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text="🙋‍♂️ Dime tu nombre y ciudad por favor"
+    )
+
 CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
     "selecciona “Galería” o “Archivo” y elige la foto."
@@ -708,7 +840,6 @@ def fase_valida(fase: str) -> bool:
     ]
     return fase in fases_validas
 
-    return fase in fases_validas
 
 def enviar_correo(dest, subj, body):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}")
@@ -1426,6 +1557,18 @@ def extraer_cm_y_convertir_talla(texto):
 
     return None
 
+def extraer_nombre(txt):
+    palabras = txt.split()
+    nombre = " ".join(p for p in palabras if p.istitle())
+    return nombre or "Nombre no detectado"
+
+def extraer_modelo(txt):
+    m = re.search(r"\d{3,4}", txt)
+    return m.group() if m else "Modelo no detectado"
+
+def extraer_dia_hora(txt):
+    m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
+    return m.group() if m else "No especificado"
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1472,25 +1615,136 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         est["fase"] = "inicio"
         return
+    # ──────────────────────────────────────────────────────
+    # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
+    # ──────────────────────────────────────────────────────
+    if re.search(r"(me pagan|me consignan|me depositan)( el)? \d{1,2}", txt):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🗓️ ¡Perfecto! Te contactaremos ese día para ayudarte a cerrar la compra.\n\n"
+                "Para dejarte agendado, por favor mándame estos datos:\n\n"
+                "• 🧑‍💼 *Tu nombre completo*\n"
+                "• 👟 *Producto que te interesa*\n"
+                "• 🕒 *¿Qué día y a qué hora te contactamos?*"
+            ),
+            parse_mode="Markdown"
+        )
+        est["fase"] = "esperando_datos_pago_posterior"
+        estado_usuario[cid] = est
+        return
 
-    # 🎬 Si el cliente pide ver videos (solo si NO está ya esperando uno)
-    if est.get("fase") != "esperando_video_referencia":
-        if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
+    # ──────────────────────────────────────────────────────
+    # 📋 RECOLECCIÓN DE DATOS PARA LA HOJA "PENDIENTES"
+    # ──────────────────────────────────────────────────────
+    if est.get("fase") == "esperando_datos_pago_posterior":
+        guardar_en_pendientes({
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "nombre": extraer_nombre(txt),
+            "telefono": cid,
+            "modelo": extraer_modelo(txt),
+            "dia_hora": extraer_dia_hora(txt)
+        })
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¡Listo! Te escribiremos ese día para ayudarte a cerrar la compra. Gracias por tu interés 🔥"
+        )
+        est["fase"] = "inicial"
+        estado_usuario[cid] = est
+        return
+    # ─────────────────────────────────────────────
+    # 💾 GUARDAR SI ES DE BUCARAMANGA (NO RESPONDER)
+    # ─────────────────────────────────────────────
+    if not memoria[cid].get("es_de_bucaramanga") and any(b in txt for b in ["bucaramanga", "bga", "b/manga"]):
+        memoria[cid]["es_de_bucaramanga"] = True
+        logging.info(f"📍 Cliente {cid} es de Bucaramanga")
+
+    if est.get("fase") == "esperando_pago":
+        if memoria[cid].get("es_de_bucaramanga"):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                    "• *DS 279 304 305* 🔥\n"
-                    "• *DS 261 277 303 295 299* 🔥\n"
-                    "• *REFERENCIAS NIÑO* 👶\n"
-                    "• *PROMO DESCUENTOS 39% OFF* 💸\n\n"
-                    "Escríbeme el número o el nombre del video que deseas ver."
+                    "💳 Como estás en *Bucaramanga*, puedes pagar cuando recibas tu pedido 🛵 "
+                    "o recogerlo en nuestra tienda 🏪\n\n"
+                    "¿Qué prefieres? *Domiciliario* o *Recoger en tienda*"
                 ),
                 parse_mode="Markdown"
             )
-            est["fase"] = "esperando_video_referencia"
+            est["fase"] = "esperando_metodo_bucaramanga"
             estado_usuario[cid] = est
             return
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="💳 Para confirmar el pedido requerimos un anticipo de $35.000. ¿Cómo deseas pagarlo?"
+            )
+            est["fase"] = "esperando_pago_normal"
+            estado_usuario[cid] = est
+            return
+    if est.get("fase") == "esperando_metodo_bucaramanga":
+        if "domicilio" in txt or "domiciliario" in txt:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🛵 Perfecto, tu pedido está en camino a tu casa. Pagarás al recibir. ¡Gracias por tu compra!"
+            )
+            guardar_en_pedidos(memoria[cid], cid, "🚚 Bucaramanga — Domicilio")
+        elif "tienda" in txt or "recoger" in txt:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🏪 Perfecto, ya te reservamos tu par de tenis. Puedes recogerlo en nuestra tienda física. ¡Gracias por tu compra!"
+            )
+            guardar_en_pedidos(memoria[cid], cid, "🏪 Bucaramanga — Recoge en tienda")
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Prefieres *domiciliario* o *recoger en tienda*? 🛵🏪"
+            )
+            return
+
+        est["fase"] = "inicial"
+        estado_usuario[cid] = est
+        return
+
+    # 🎬 Si el cliente pide ver videos (sin menú, enviar todos directamente)
+    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
+        ruta_videos = "/var/data/videos"
+        try:
+            archivos = sorted([
+                f for f in os.listdir(ruta_videos)
+                if f.lower().endswith(".mp4")
+            ])
+            if not archivos:
+                await ctx.bot.send_message(chat_id=cid, text="⚠️ No hay videos disponibles en este momento.")
+                return
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🎬 Te muestro todas nuestras referencias en video. ¡Revisa estos modelos con calma!"
+            )
+
+            for nombre in archivos:
+                path = os.path.join(ruta_videos, nombre)
+                await ctx.bot.send_video(
+                    chat_id=cid,
+                    video=open(path, "rb"),
+                    caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
+                    parse_mode="Markdown"
+                )
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🧐 ¿Cuál de estos modelos te interesa?"
+            )
+            est["fase"] = "esperando_modelo_elegido"
+            estado_usuario[cid] = est
+            return
+
+        except Exception as e:
+            logging.error(f"❌ Error al enviar videos: {e}")
+            await ctx.bot.send_message(chat_id=cid, text="❌ Hubo un problema al enviar los videos.")
+        return
+
 
     # 🎬 Procesar selección de video
     if est.get("fase") == "esperando_video_referencia":
@@ -1715,12 +1969,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*."
         )
         return
-
-
-
-
-
-
 
     # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
     palabras_precio = (
@@ -2119,6 +2367,27 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
+            # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
+            match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
+            if match_talla:
+                talla_cliente = match_talla.group(1) or match_talla.group(2)
+                if talla_cliente in tallas:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
+                            "📸 Pero para estar más seguros, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
+                        ),
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=f"❌ Lo siento, no tenemos disponible la talla *{talla_cliente}* para ese modelo.",
+                        parse_mode="Markdown"
+                    )
+
+            # Continuar con el flujo normal sin botones
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
@@ -2130,14 +2399,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
-                parse_mode="Markdown"
-            )
-            reset_estado(cid)
-            return
+
 
 
 
@@ -2274,7 +2536,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             estado_usuario[cid] = est
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿Tu nombre completo para el pedido?",
+                text="🤩Perfecto, para iniciar la orden de compra dime tu nombre completo",
                 parse_mode="Markdown"
             )
             return
@@ -3436,7 +3698,7 @@ async def venom_webhook(req: Request):
                         estado_usuario[cid] = est
                         return JSONResponse({
                             "type": "text",
-                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
+                            "text": f"📏 Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{talla_detectada}* en nuestra horma. ¿Deseas que te lo enviemos hoy mismo?",
                             "parse_mode": "Markdown"
                         })
                     else:
@@ -3521,11 +3783,13 @@ async def venom_webhook(req: Request):
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: *{precio_str}* y hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
                         })
+
                     else:
                         reset_estado(cid)
                         return JSONResponse({
@@ -3616,7 +3880,7 @@ if __name__ == "__main__":
     descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
     descargar_video_confianza()
- 
+    descargar_audios_bienvenida_drive()
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
