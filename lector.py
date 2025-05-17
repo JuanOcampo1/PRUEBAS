@@ -2101,8 +2101,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
-                    f"👉 Opciones: {', '.join(tallas)}"
+                    "Tenemos las siguientes tallas disponibles para el modelo 279 color VERDE NEON:\n\n"
+                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
                 ),
                 parse_mode="Markdown"
             )
@@ -2115,6 +2116,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
+
 
     # 🛒 Flujo manual si está buscando modelo
     if est.get("fase") == "esperando_modelo":
@@ -3390,24 +3392,24 @@ async def venom_webhook(req: Request):
                     talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
                     if talla_detectada:
                         est["talla"] = talla_detectada
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text=f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
-                            parse_mode="Markdown"
-                        )
                         estado_usuario[cid] = est
+                        return {
+                            "type": "text",
+                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?"
+                        }
                     else:
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text="❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
-                        )
+                        return {
+                            "type": "text",
+                            "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
+                        }
                 except Exception as e:
                     logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
-                    )
-                return
+                    return {
+                        "type": "text",
+                        "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
+                    }
+
+
 
             # 🧠 CLIP - identificación de modelo
             else:
