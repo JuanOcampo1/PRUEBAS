@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 import gspread
 from google.oauth2 import service_account     # ← alias de antes
-
+from collections import Counter
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
 from google.oauth2.service_account import Credentials   # forma única
@@ -64,6 +64,12 @@ logging.basicConfig(level=logging.INFO,
 # ─── Instancia de FastAPI ────────────────────────────────────────────────
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
+
+async def enviar_mensaje(cid, texto, parse_mode=None):
+    try:
+        await bot.send_message(chat_id=cid, text=texto, parse_mode=parse_mode)
+    except Exception as e:
+        logging.error(f"[❌ enviar_mensaje] Error enviando a {cid}: {e}")
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -1427,6 +1433,36 @@ def extraer_cm_y_convertir_talla(texto):
     return None
 
 
+def detectar_color_dominante(path_img):
+    """Detecta el color dominante entre los principales colores usados en el modelo 279."""
+    image = Image.open(path_img).convert('RGB')
+    small = image.resize((50, 50))  # reducir para eficiencia
+    pixels = list(small.getdata())
+    color = Counter(pixels).most_common(1)[0][0]
+
+    r, g, b = color
+
+    # Lógica simple de detección de color
+    if r > 200 and g > 200 and b < 100:
+        return "AMARILLO"
+    elif r > 200 and g < 100 and b < 100:
+        return "ROJO"
+    elif b > 180 and r < 100 and g < 100:
+        return "AZUL"
+    elif r > 180 and b > 180 and g < 100:
+        return "FUCSIA"
+    elif r > 100 and g > 100 and b > 100:
+        return "BLANCO"
+    elif r < 80 and g < 80 and b < 80:
+        return "NEGRO"
+    elif g > 180 and r < 150 and b < 150:
+        return "VERDE"
+    elif r > 230 and g > 150 and b < 100:
+        return "NARANJA"
+    else:
+        return "color no identificado"
+
+
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2023,51 +2059,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
         f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}.jpg")
         os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
+        path_local = os.path.join("temp", f"{cid}.jpg")
+        await f.download_to_drive(path_local)
 
-        # ➜ convert to base64 y usar CLIP
-        with open(tmp, "rb") as f_img:
-            base64_img = base64.b64encode(f_img.read()).decode("utf-8")
-        os.remove(tmp)
-
-        mensaje = await identificar_modelo_desde_imagen(base64_img)
-
-        if "coincide con *" in mensaje.lower():
-            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
-            if modelo_detectado:
-                p = modelo_detectado[0].split("_")
-                est.update({
-                    "marca": p[0] if len(p) > 0 else "Desconocida",
-                    "modelo": p[1] if len(p) > 1 else "Desconocido",
-                    "color": p[2] if len(p) > 2 else "Desconocido",
-                    "fase": "imagen_detectada",
-                })
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=mensaje + "\n¿Continuamos? (SI/NO)",
-                reply_markup=menu_botones(["SI", "NO"]),
-                parse_mode="Markdown"
-            )
-        else:
-            reset_estado(cid)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
-                parse_mode="Markdown"
-            )
-        return
-
-    # 📸 Imagen detectada — responder con modelo, color y PRECIO
-    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and 'path_local' in locals():
+        # 🔎 Identificar modelo con CLIP
         resultado = identificar_modelo_desde_clip(path_local)
         if resultado:
-            modelo_detectado, color_detectado = resultado
+            modelo_detectado, _ = resultado  # color lo tomamos con función separada
+            color_detectado = detectar_color_dominante(path_local)
+
+            est["marca"] = "DS"  # Por defecto o detectar si usas múltiples marcas
             est["modelo"] = modelo_detectado
             est["color"] = color_detectado
             est["fase"] = "imagen_detectada"
 
+            # 💰 Buscar precio
             precio = next(
                 (i["precio"] for i in inv if
                  normalize(i["marca"]) == normalize(est.get("marca", "")) and
@@ -2078,17 +2085,24 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["precio_total"] = int(precio) if precio else None
 
             mensaje = (
-                f"📸 La imagen coincide con *{modelo_detectado}* color *{color_detectado}*.\n"
-                f"✅ ¿Confirmas que es el modelo que deseas?"
+                f"📸 La imagen coincide con *{modelo_detectado}* de color *{color_detectado}*.\n"
+                f"{'💰 Precio: *$' + str(precio) + '* COP.' if precio else '🟡 No se encontró el precio exacto en inventario.'}\n\n"
+                "¿Confirmas que es el modelo que deseas?"
             )
-            if precio:
-                mensaje += f"\n💰 Ese modelo tiene un precio de *${precio}* COP."
 
-            mensaje += "\n\nResponde *sí* para continuar o *no* para elegir otro modelo."
-
-            await ctx.bot.send_message(chat_id=cid, text=mensaje, parse_mode="Markdown")
-            return
-
+            await enviar_mensaje(
+                cid,
+                mensaje + "\n\nResponde *sí* para continuar o *no* para elegir otro modelo.",
+                parse_mode="Markdown"
+            )
+        else:
+            reset_estado(cid)
+            await enviar_mensaje(
+                cid,
+                "😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
+                parse_mode="Markdown"
+            )
+        return
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -2116,6 +2130,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
+
 
 
     # 🛒 Flujo manual si está buscando modelo
