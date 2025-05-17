@@ -623,7 +623,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-        if mejor_modelo and mejor_sim >= 0.85:
+        if mejor_modelo and mejor_sim >= 0.90:
             return f"✅ La imagen coincide con *{mejor_modelo}*"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -3477,7 +3477,7 @@ async def venom_webhook(req: Request):
 
                     logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    if mejor_modelo and mejor_sim >= 0.85:
+                    if mejor_modelo and mejor_sim >= 0.90:
                         p = mejor_modelo.split("_")
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
