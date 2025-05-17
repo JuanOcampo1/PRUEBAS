@@ -1769,7 +1769,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=("Para darte el precio necesito saber la referencia o repetirla. "
-                      "¿Puedes decirme cuál estás mirando?")
+                      "¿Puedes decirme cuál estás mirando,")
             )
         return
 
@@ -3026,6 +3026,18 @@ async def manejar_precio(update, ctx, inventario):
     txt = normalize(mensaje)
     logging.debug(f"[manejar_precio] Mensaje recibido: {mensaje}")
 
+    # ✅ PROTECCIÓN — Solo ejecutarse si no está en fases de video
+    est = estado_usuario.get(cid, {})
+    fase_actual = est.get("fase", "")
+
+    if fase_actual in (
+        "esperando_video_referencia",
+        "esperando_color_post_video",
+        "esperando_modelo_elegido"
+    ):
+        logging.info(f"[manejar_precio] Ignorado: usuario en fase '{fase_actual}'")
+        return False
+
     # Detectar referencia de 3 o 4 dígitos
     m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
     if not m_ref:
@@ -3084,12 +3096,11 @@ async def manejar_precio(update, ctx, inventario):
                 logging.error(f"[manejar_precio] Error formateando tallas: {e}")
 
         # ✅ Guardar estado de forma segura
-        est = estado_usuario.get(cid, {})
         est["fase"] = "confirmar_compra"
         est["modelo_confirmado"] = primer_producto["modelo"]
         est["color_confirmado"] = primer_producto["color"]
         est["marca"] = primer_producto.get("marca", "sin marca")
-        estado_usuario[cid] = est  # ✅ GUARDA el estado correctamente
+        estado_usuario[cid] = est
 
         logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
 
@@ -3098,7 +3109,7 @@ async def manejar_precio(update, ctx, inventario):
             text=(
                 f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
                 f"{respuesta_final}"
-                "Seguimos con la compra?\n\n"
+                "¿Seguimos con la compra?\n\n"
             ),
             parse_mode="Markdown"
         )
@@ -3116,6 +3127,7 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
+
 
 
 
