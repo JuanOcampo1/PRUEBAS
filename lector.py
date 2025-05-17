@@ -66,14 +66,6 @@ api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
 
-async def enviar_mensaje(cid, texto, parse_mode=None):
-    logging.info(f"[🟢 enviar_mensaje] → {cid}: {texto}")
-    return JSONResponse({
-        "type": "text",
-        "text": texto,
-        "parse_mode": parse_mode or "Markdown"
-    })
-
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
     """
@@ -2060,52 +2052,58 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        os.makedirs("temp", exist_ok=True)
-        path_local = os.path.join("temp", f"{cid}.jpg")
-        await f.download_to_drive(path_local)
+        try:
+            f = await update.message.photo[-1].get_file()
+            os.makedirs("temp", exist_ok=True)
+            path_local = os.path.join("temp", f"{cid}.jpg")
+            await f.download_to_drive(path_local)
 
-        # 🔎 Identificar modelo con CLIP
-        resultado = identificar_modelo_desde_clip(path_local)
-        if resultado:
-            modelo_detectado, _ = resultado            # color con función separada
-            color_detectado = detectar_color_dominante(path_local)
+            # 🔎 Identificar modelo con CLIP
+            resultado = identificar_modelo_desde_clip(path_local)
+            if resultado and isinstance(resultado, (tuple, list)) and len(resultado) >= 2:
+                modelo_detectado, _ = resultado
+                color_detectado = detectar_color_dominante(path_local)
 
-            est["marca"] = "DS"                        # o detección múltiple
-            est["modelo"] = modelo_detectado
-            est["color"] = color_detectado
-            est["fase"]  = "imagen_detectada"
+                est["marca"] = "DS"
+                est["modelo"] = modelo_detectado
+                est["color"]  = color_detectado
+                est["fase"]   = "imagen_detectada"
 
-            # 💰 Buscar precio
-            precio = next(
-                (i["precio"] for i in inv if
-                 normalize(i["marca"])  == normalize(est["marca"])  and
-                 normalize(i["modelo"]) == normalize(modelo_detectado) and
-                 normalize(i["color"])  == normalize(color_detectado)),
-                None
-            )
-            est["precio_total"] = int(precio) if precio else None
+                precio = next(
+                    (i["precio"] for i in inv if
+                     normalize(i["marca"])  == normalize(est["marca"])  and
+                     normalize(i["modelo"]) == normalize(modelo_detectado) and
+                     normalize(i["color"])  == normalize(color_detectado)),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else None
 
-            mensaje = (
-                f"📸 La imagen coincide con *{modelo_detectado}* de color *{color_detectado}*.\n"
-                f"{'💰 Precio: *$' + str(precio) + '* COP.' if precio else '🟡 No se encontró el precio exacto en inventario.'}\n\n"
-                "¿Confirmas que es el modelo que deseas?"
-            )
+                mensaje = (
+                    f"📸 La imagen coincide con *{modelo_detectado}* de color *{color_detectado}*.\n"
+                    f"{'💰 Precio: *$' + str(precio) + '* COP.' if precio else '🟡 No se encontró el precio exacto en inventario.'}\n\n"
+                    "¿Confirmas que es el modelo que deseas?"
+                )
 
-            # ⬅️ IMPORTANTE: devolvemos la respuesta al cliente
-            return await enviar_mensaje(
-                cid,
-                mensaje + "\n\nResponde *sí* para continuar o *no* para elegir otro modelo.",
-                parse_mode="Markdown"
-            )
+                return JSONResponse({
+                    "type": "text",
+                    "text": mensaje + "\n\nResponde *sí* para continuar o *no* para elegir otro modelo.",
+                    "parse_mode": "Markdown"
+                })
 
-        # 👉 Si no reconoció el modelo
-        reset_estado(cid)
-        return await enviar_mensaje(
-            cid,
-            "😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
-            parse_mode="Markdown"
-        )
+            reset_estado(cid)
+            return JSONResponse({
+                "type": "text",
+                "text": "😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
+                "parse_mode": "Markdown"
+            })
+
+        except Exception as e:
+            logging.exception(f"❌ Error procesando imagen enviada: {e}")
+            return JSONResponse({
+                "type": "text",
+                "text": "⚠️ Ocurrió un error analizando tu imagen. Intenta con otra distinta o vuelve a escribir /start.",
+                "parse_mode": "Markdown"
+            })
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -2118,24 +2116,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            return await enviar_mensaje(
-                cid,
-                (
+            return JSONResponse({
+                "type": "text",
+                "text": (
                     f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* "
                     f"color *{est['color']}*:\n\n"
                     f"👉 Opciones: {', '.join(tallas)}\n\n"
                     "📸 O puedes enviarme una foto de la lengüeta del zapato y te ayudo a identificar tu talla ideal automáticamente."
                 ),
-                parse_mode="Markdown"
-            )
+                "parse_mode": "Markdown"
+            })
 
-        # ❌ El usuario canceló
         reset_estado(cid)
-        return await enviar_mensaje(
-            cid,
-            "Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
-            parse_mode="Markdown"
-        )
+        return JSONResponse({
+            "type": "text",
+            "text": "Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
+            "parse_mode": "Markdown"
+        })
 
 
 
@@ -2166,7 +2163,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if isinstance(colores, (int, float, str)):
             colores = [str(colores)]
 
-        # Normalizar entrada y colores
         colores_normalizados = {normalize(c): c for c in colores}
         entrada_normalizada = normalize(txt)
         coincidencias = difflib.get_close_matches(entrada_normalizada, colores_normalizados.keys(), n=1, cutoff=0.6)
@@ -2180,29 +2176,27 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            await enviar_mensaje(
-                cid,
-                (
+            return JSONResponse({
+                "type": "text",
+                "text": (
                     f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
                     f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
                     "📸 O puedes enviarme una foto de la lengüeta del zapato y te ayudo a identificar tu talla ideal automáticamente."
                 ),
-                parse_mode="Markdown"
-            )
+                "parse_mode": "Markdown"
+            })
         else:
             colores_str = "\n".join(f"- {c}" for c in colores)
-            await enviar_mensaje(
-                cid,
-                (
+            return JSONResponse({
+                "type": "text",
+                "text": (
                     f"⚠️ No entendí ese color.\n\n"
                     f"🎨 Los colores disponibles para *{est['modelo']}* son:\n\n"
                     f"{colores_str}\n\n"
                     "¿Cuál color te interesa?"
                 ),
-                parse_mode="Markdown"
-            )
-        return
-
+                "parse_mode": "Markdown"
+            })
 
     # 👟 Elegir talla
     if est.get("fase") == "esperando_talla":
@@ -2217,7 +2211,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             # 🔍 Ver si ya hay memoria del cliente
             cliente = obtener_datos_cliente(numero)
-
             if cliente:
                 nombre    = cliente.get("nombre", "cliente")
                 correo    = cliente.get("correo", "No registrado")
@@ -2261,30 +2254,33 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
                 est["fase"] = "confirmar_datos_guardados"
                 estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
-                return
+
+                return JSONResponse({
+                    "type": "text",
+                    "text": resumen,
+                    "parse_mode": "Markdown"
+                })
 
             # 🧾 No hay cliente guardado → continuar normal
             est["fase"] = "esperando_nombre"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Tu nombre completo para el pedido?",
-                parse_mode="Markdown"
-            )
             estado_usuario[cid] = est
-            return
+            return JSONResponse({
+                "type": "text",
+                "text": "¿Tu nombre completo para el pedido?",
+                "parse_mode": "Markdown"
+            })
 
         # Si no se detecta talla, mostrar las tallas disponibles + pedir imagen
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
+        return JSONResponse({
+            "type": "text",
+            "text": (
                 f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
                 f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
                 "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
             ),
-            parse_mode="Markdown"
-        )
-        return
+            "parse_mode": "Markdown"
+        })
+
 
 
 
