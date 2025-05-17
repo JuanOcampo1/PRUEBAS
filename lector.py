@@ -65,11 +65,14 @@ logging.basicConfig(level=logging.INFO,
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
+
 async def enviar_mensaje(cid, texto, parse_mode=None):
-    try:
-        await bot.send_message(chat_id=cid, text=texto, parse_mode=parse_mode)
-    except Exception as e:
-        logging.error(f"[❌ enviar_mensaje] Error enviando a {cid}: {e}")
+    logging.info(f"[🟢 enviar_mensaje] → {cid}: {texto}")
+    return JSONResponse({
+        "type": "text",
+        "text": texto,
+        "parse_mode": parse_mode or "Markdown"
+    })
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -459,7 +462,6 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
-from fastapi.responses import JSONResponse
 
 @api.get("/ver_embeddings")
 async def ver_embeddings():
@@ -2066,20 +2068,20 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 🔎 Identificar modelo con CLIP
         resultado = identificar_modelo_desde_clip(path_local)
         if resultado:
-            modelo_detectado, _ = resultado  # color lo tomamos con función separada
+            modelo_detectado, _ = resultado            # color con función separada
             color_detectado = detectar_color_dominante(path_local)
 
-            est["marca"] = "DS"  # Por defecto o detectar si usas múltiples marcas
+            est["marca"] = "DS"                        # o detección múltiple
             est["modelo"] = modelo_detectado
             est["color"] = color_detectado
-            est["fase"] = "imagen_detectada"
+            est["fase"]  = "imagen_detectada"
 
             # 💰 Buscar precio
             precio = next(
                 (i["precio"] for i in inv if
-                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
+                 normalize(i["marca"])  == normalize(est["marca"])  and
                  normalize(i["modelo"]) == normalize(modelo_detectado) and
-                 normalize(i["color"]) == normalize(color_detectado)),
+                 normalize(i["color"])  == normalize(color_detectado)),
                 None
             )
             est["precio_total"] = int(precio) if precio else None
@@ -2090,46 +2092,51 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "¿Confirmas que es el modelo que deseas?"
             )
 
-            await enviar_mensaje(
+            # ⬅️ IMPORTANTE: devolvemos la respuesta al cliente
+            return await enviar_mensaje(
                 cid,
                 mensaje + "\n\nResponde *sí* para continuar o *no* para elegir otro modelo.",
                 parse_mode="Markdown"
             )
-        else:
-            reset_estado(cid)
-            await enviar_mensaje(
-                cid,
-                "😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
-                parse_mode="Markdown"
-            )
-        return
+
+        # 👉 Si no reconoció el modelo
+        reset_estado(cid)
+        return await enviar_mensaje(
+            cid,
+            "😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
+            parse_mode="Markdown"
+        )
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
-        if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
+        if any(frase in txt.lower() for frase in (
+            "si", "sí", "s", "claro", "claro que sí",
+            "quiero comprar", "continuar", "vamos"
+        )):
             est["fase"] = "esperando_talla"
             tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            await enviar_mensaje(
+            return await enviar_mensaje(
                 cid,
                 (
-                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* "
+                    f"color *{est['color']}*:\n\n"
                     f"👉 Opciones: {', '.join(tallas)}\n\n"
                     "📸 O puedes enviarme una foto de la lengüeta del zapato y te ayudo a identificar tu talla ideal automáticamente."
                 ),
                 parse_mode="Markdown"
             )
-            return
-        else:
-            await enviar_mensaje(
-                cid,
-                "Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
-                parse_mode="Markdown"
-            )
-            reset_estado(cid)
-            return
+
+        # ❌ El usuario canceló
+        reset_estado(cid)
+        return await enviar_mensaje(
+            cid,
+            "Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
+            parse_mode="Markdown"
+        )
+
 
 
 
