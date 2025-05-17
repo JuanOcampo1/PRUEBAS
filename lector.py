@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 import gspread
 from google.oauth2 import service_account     # ← alias de antes
-from collections import Counter
+
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
 from google.oauth2.service_account import Credentials   # forma única
@@ -64,7 +64,6 @@ logging.basicConfig(level=logging.INFO,
 # ─── Instancia de FastAPI ────────────────────────────────────────────────
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
-
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -454,6 +453,7 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
+from fastapi.responses import JSONResponse
 
 @api.get("/ver_embeddings")
 async def ver_embeddings():
@@ -615,7 +615,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-        if mejor_modelo and mejor_sim >= 0.90:
+        if mejor_modelo and mejor_sim >= 0.85:
             return f"✅ La imagen coincide con *{mejor_modelo}*"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -1427,36 +1427,6 @@ def extraer_cm_y_convertir_talla(texto):
     return None
 
 
-def detectar_color_dominante(path_img):
-    """Detecta el color dominante entre los principales colores usados en el modelo 279."""
-    image = Image.open(path_img).convert('RGB')
-    small = image.resize((50, 50))  # reducir para eficiencia
-    pixels = list(small.getdata())
-    color = Counter(pixels).most_common(1)[0][0]
-
-    r, g, b = color
-
-    # Lógica simple de detección de color
-    if r > 200 and g > 200 and b < 100:
-        return "AMARILLO"
-    elif r > 200 and g < 100 and b < 100:
-        return "ROJO"
-    elif b > 180 and r < 100 and g < 100:
-        return "AZUL"
-    elif r > 180 and b > 180 and g < 100:
-        return "FUCSIA"
-    elif r > 100 and g > 100 and b > 100:
-        return "BLANCO"
-    elif r < 80 and g < 80 and b < 80:
-        return "NEGRO"
-    elif g > 180 and r < 150 and b < 150:
-        return "VERDE"
-    elif r > 230 and g > 150 and b < 100:
-        return "NARANJA"
-    else:
-        return "color no identificado"
-
-
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2052,89 +2022,100 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
-        try:
-            f = await update.message.photo[-1].get_file()
-            os.makedirs("temp", exist_ok=True)
-            path_local = os.path.join("temp", f"{cid}.jpg")
-            await f.download_to_drive(path_local)
+        f = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp)
 
-            # 🔎 Identificar modelo con CLIP
-            resultado = identificar_modelo_desde_clip(path_local)
-            if resultado and isinstance(resultado, (tuple, list)) and len(resultado) >= 2:
-                modelo_detectado, _ = resultado
-                color_detectado = detectar_color_dominante(path_local)
+        # ➜ convert to base64 y usar CLIP
+        with open(tmp, "rb") as f_img:
+            base64_img = base64.b64encode(f_img.read()).decode("utf-8")
+        os.remove(tmp)
 
-                est["marca"] = "DS"
-                est["modelo"] = modelo_detectado
-                est["color"]  = color_detectado
-                est["fase"]   = "imagen_detectada"
+        mensaje = await identificar_modelo_desde_imagen(base64_img)
 
-                precio = next(
-                    (i["precio"] for i in inv if
-                     normalize(i["marca"])  == normalize(est["marca"])  and
-                     normalize(i["modelo"]) == normalize(modelo_detectado) and
-                     normalize(i["color"])  == normalize(color_detectado)),
-                    None
-                )
-                est["precio_total"] = int(precio) if precio else None
-
-                mensaje = (
-                    f"📸 La imagen coincide con *{modelo_detectado}* de color *{color_detectado}*.\n"
-                    f"{'💰 Precio: *$' + str(precio) + '* COP.' if precio else '🟡 No se encontró el precio exacto en inventario.'}\n\n"
-                    "¿Confirmas que es el modelo que deseas?"
-                )
-
-                return JSONResponse({
-                    "type": "text",
-                    "text": mensaje + "\n\nResponde *sí* para continuar o *no* para elegir otro modelo.",
-                    "parse_mode": "Markdown"
+        if "coincide con *" in mensaje.lower():
+            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
+            if modelo_detectado:
+                p = modelo_detectado[0].split("_")
+                est.update({
+                    "marca": p[0] if len(p) > 0 else "Desconocida",
+                    "modelo": p[1] if len(p) > 1 else "Desconocido",
+                    "color": p[2] if len(p) > 2 else "Desconocido",
+                    "fase": "imagen_detectada",
                 })
-
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=mensaje + "\n¿Continuamos? (SI/NO)",
+                reply_markup=menu_botones(["SI", "NO"]),
+                parse_mode="Markdown"
+            )
+        else:
             reset_estado(cid)
-            return JSONResponse({
-                "type": "text",
-                "text": "😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
-                "parse_mode": "Markdown"
-            })
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
+                parse_mode="Markdown"
+            )
+        return
 
-        except Exception as e:
-            logging.exception(f"❌ Error procesando imagen enviada: {e}")
-            return JSONResponse({
-                "type": "text",
-                "text": "⚠️ Ocurrió un error analizando tu imagen. Intenta con otra distinta o vuelve a escribir /start.",
-                "parse_mode": "Markdown"
-            })
+    # 📸 Imagen detectada — responder con modelo, color y PRECIO
+    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and 'path_local' in locals():
+        resultado = identificar_modelo_desde_clip(path_local)
+        if resultado:
+            modelo_detectado, color_detectado = resultado
+            est["modelo"] = modelo_detectado
+            est["color"] = color_detectado
+            est["fase"] = "imagen_detectada"
+
+            precio = next(
+                (i["precio"] for i in inv if
+                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
+                 normalize(i["modelo"]) == normalize(modelo_detectado) and
+                 normalize(i["color"]) == normalize(color_detectado)),
+                None
+            )
+            est["precio_total"] = int(precio) if precio else None
+
+            mensaje = (
+                f"📸 La imagen coincide con *{modelo_detectado}* color *{color_detectado}*.\n"
+                f"✅ ¿Confirmas que es el modelo que deseas?"
+            )
+            if precio:
+                mensaje += f"\n💰 Ese modelo tiene un precio de *${precio}* COP."
+
+            mensaje += "\n\nResponde *sí* para continuar o *no* para elegir otro modelo."
+
+            await ctx.bot.send_message(chat_id=cid, text=mensaje, parse_mode="Markdown")
+            return
+
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
-        if any(frase in txt.lower() for frase in (
-            "si", "sí", "s", "claro", "claro que sí",
-            "quiero comprar", "continuar", "vamos"
-        )):
+        if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
             est["fase"] = "esperando_talla"
             tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            return JSONResponse({
-                "type": "text",
-                "text": (
-                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* "
-                    f"color *{est['color']}*:\n\n"
+            await enviar_mensaje(
+                cid,
+                (
+                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
                     f"👉 Opciones: {', '.join(tallas)}\n\n"
                     "📸 O puedes enviarme una foto de la lengüeta del zapato y te ayudo a identificar tu talla ideal automáticamente."
                 ),
-                "parse_mode": "Markdown"
-            })
-
-        reset_estado(cid)
-        return JSONResponse({
-            "type": "text",
-            "text": "Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
-            "parse_mode": "Markdown"
-        })
-
-
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            await enviar_mensaje(
+                cid,
+                "Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
+                parse_mode="Markdown"
+            )
+            reset_estado(cid)
+            return
 
 
     # 🛒 Flujo manual si está buscando modelo
@@ -2163,6 +2144,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if isinstance(colores, (int, float, str)):
             colores = [str(colores)]
 
+        # Normalizar entrada y colores
         colores_normalizados = {normalize(c): c for c in colores}
         entrada_normalizada = normalize(txt)
         coincidencias = difflib.get_close_matches(entrada_normalizada, colores_normalizados.keys(), n=1, cutoff=0.6)
@@ -2176,27 +2158,29 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            return JSONResponse({
-                "type": "text",
-                "text": (
+            await enviar_mensaje(
+                cid,
+                (
                     f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
                     f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                    "📸 O puedes enviarme una foto de la lengüeta del zapato y te ayudo a identificar tu talla ideal automáticamente."
+                    "📸 O puedesenviarme una foto de la lengüeta del zapato y te ayudo a identificar tu talla ideal automáticamente."
                 ),
-                "parse_mode": "Markdown"
-            })
+                parse_mode="Markdown"
+            )
         else:
             colores_str = "\n".join(f"- {c}" for c in colores)
-            return JSONResponse({
-                "type": "text",
-                "text": (
+            await enviar_mensaje(
+                cid,
+                (
                     f"⚠️ No entendí ese color.\n\n"
                     f"🎨 Los colores disponibles para *{est['modelo']}* son:\n\n"
                     f"{colores_str}\n\n"
                     "¿Cuál color te interesa?"
                 ),
-                "parse_mode": "Markdown"
-            })
+                parse_mode="Markdown"
+            )
+        return
+
 
     # 👟 Elegir talla
     if est.get("fase") == "esperando_talla":
@@ -2211,6 +2195,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             # 🔍 Ver si ya hay memoria del cliente
             cliente = obtener_datos_cliente(numero)
+
             if cliente:
                 nombre    = cliente.get("nombre", "cliente")
                 correo    = cliente.get("correo", "No registrado")
@@ -2254,33 +2239,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
                 est["fase"] = "confirmar_datos_guardados"
                 estado_usuario[cid] = est
-
-                return JSONResponse({
-                    "type": "text",
-                    "text": resumen,
-                    "parse_mode": "Markdown"
-                })
+                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+                return
 
             # 🧾 No hay cliente guardado → continuar normal
             est["fase"] = "esperando_nombre"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Tu nombre completo para el pedido?",
+                parse_mode="Markdown"
+            )
             estado_usuario[cid] = est
-            return JSONResponse({
-                "type": "text",
-                "text": "¿Tu nombre completo para el pedido?",
-                "parse_mode": "Markdown"
-            })
+            return
 
         # Si no se detecta talla, mostrar las tallas disponibles + pedir imagen
-        return JSONResponse({
-            "type": "text",
-            "text": (
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
                 f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
                 f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
                 "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
             ),
-            "parse_mode": "Markdown"
-        })
-
+            parse_mode="Markdown"
+        )
+        return
 
 
 
@@ -3473,7 +3455,7 @@ async def venom_webhook(req: Request):
 
                     logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    if mejor_modelo and mejor_sim >= 0.90:
+                    if mejor_modelo and mejor_sim >= 0.85:
                         p = mejor_modelo.split("_")
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
