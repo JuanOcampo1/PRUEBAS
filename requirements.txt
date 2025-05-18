@@ -27,3 +27,4 @@ pydub
 ffmpeg-python
 pillow
 numpy==1.26.4
+oauth2client==4.1.3
