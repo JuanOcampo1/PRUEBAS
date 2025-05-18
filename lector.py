@@ -1656,12 +1656,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ─────────────────────────────────────────────
     # 💾 GUARDAR SI ES DE BUCARAMANGA (NO RESPONDER)
     # ─────────────────────────────────────────────
-    if not memoria[cid].get("es_de_bucaramanga") and any(b in txt for b in ["bucaramanga", "bga", "b/manga"]):
-        memoria[cid]["es_de_bucaramanga"] = True
+    if not est.get("es_de_bucaramanga") and any(b in txt for b in ["bucaramanga", "bga", "b/manga"]):
+        est["es_de_bucaramanga"] = True
+        estado_usuario[cid] = est
         logging.info(f"📍 Cliente {cid} es de Bucaramanga")
 
     if est.get("fase") == "esperando_pago":
-        if memoria[cid].get("es_de_bucaramanga"):
+        if est.get("es_de_bucaramanga"):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
@@ -1682,19 +1683,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["fase"] = "esperando_pago_normal"
             estado_usuario[cid] = est
             return
+
     if est.get("fase") == "esperando_metodo_bucaramanga":
         if "domicilio" in txt or "domiciliario" in txt:
             await ctx.bot.send_message(
                 chat_id=cid,
                 text="🛵 Perfecto, tu pedido está en camino a tu casa. Pagarás al recibir. ¡Gracias por tu compra!"
             )
-            guardar_en_pedidos(memoria[cid], cid, "🚚 Bucaramanga — Domicilio")
+            guardar_en_pedidos(est, cid, "🚚 Bucaramanga — Domicilio")
+
         elif "tienda" in txt or "recoger" in txt:
             await ctx.bot.send_message(
                 chat_id=cid,
                 text="🏪 Perfecto, ya te reservamos tu par de tenis. Puedes recogerlo en nuestra tienda física. ¡Gracias por tu compra!"
             )
-            guardar_en_pedidos(memoria[cid], cid, "🏪 Bucaramanga — Recoge en tienda")
+            guardar_en_pedidos(est, cid, "🏪 Bucaramanga — Recoge en tienda")
+
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1706,8 +1710,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
         return
 
-    # 🎬 Si el cliente pide ver videos (sin menú, enviar todos directamente)
+
+    # 🎬 Petición de video — general o específica
     if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
+        # Revisa si la frase incluye una referencia específica conocida
+        referencias_validas = {
+            "261", "ds 261", "277", "ds 277", "303", "ds 303",
+            "295", "ds 295", "299", "ds 299",
+            "279", "ds 279", "304", "ds 304", "305", "ds 305",
+            "niño", "niños", "kids", "infantil", "promo", "descuento", "descuentos"
+        }
+
+        ref = normalize(txt)
+        if ref in referencias_validas:
+            # Usa flujo de video individual
+            video_respuesta = await enviar_video_referencia(cid, ctx, ref)
+            logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
+
+            if isinstance(video_respuesta, dict):
+                est["video_activo"] = ref
+                est["fase"] = "esperando_color_post_video"
+                estado_usuario[cid] = est
+                return video_respuesta
+
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
+            return
+
+        # Si no especifica referencia, se envían todos los videos
         ruta_videos = "/var/data/videos"
         try:
             archivos = sorted([
@@ -1741,48 +1771,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         except Exception as e:
-            logging.error(f"❌ Error al enviar videos: {e}")
+            logging.error(f"❌ Error al enviar videos masivos: {e}")
             await ctx.bot.send_message(chat_id=cid, text="❌ Hubo un problema al enviar los videos.")
-        return
-
-
-    # 🎬 Procesar selección de video
-    if est.get("fase") == "esperando_video_referencia":
-        logging.info("[RESPONDER] ⇢ Entró fase 'esperando_video_referencia'")
-        logging.debug(f"[RESPONDER] Texto bruto = {txt_raw!r}")
-
-        ref = normalize(txt_raw)
-        logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
-
-        # Verificar si es una referencia válida de video
-        referencias_validas = {
-            "261", "ds 261", "277", "ds 277", "303", "ds 303",
-            "295", "ds 295", "299", "ds 299",
-            "279", "ds 279", "304", "ds 304", "305", "ds 305",
-            "niño", "niños", "kids", "infantil", "promo", "descuento", "descuentos"
-        }
-
-        if ref not in referencias_validas:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Esa referencia no la reconozco como un video. Si querías continuar tu compra, dime el modelo o mándame una imagen."
-            )
-            est["fase"] = "inicio"
-            estado_usuario[cid] = est
-            return
-
-        video_respuesta = await enviar_video_referencia(cid, ctx, ref)
-        logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
-
-        if isinstance(video_respuesta, dict):
-            est["video_activo"] = ref
-            est["fase"] = "esperando_color_post_video"
-            estado_usuario[cid] = est
-            return video_respuesta
-
-        # Si hubo error o el video no existe
-        est["fase"] = "inicio"
-        estado_usuario[cid] = est
         return
 
 
@@ -3554,14 +3544,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # 💬 Saludo / start
     if texto in ("/start", "start", "hola", "buenas", "hey"):
         reset_estado(cid)
-        return {
-            "type": "text",
-            "text": ("¡Bienvenido a *X100🔥👟*!\n\n"
-                     "Si tienes una foto puedes enviarla\n"
-                     "Si tienes número de referencia, envíamelo\n"
-                     "¿Te gustaría ver unos videos de nuestras referencias?\n"
-                     "Cuéntame sin problema 😀")
-        }
+        await enviar_welcome(cid, ctx)
+        return
+
 
     # 🔊 Petición de audio
     if any(f in txt for f in (
