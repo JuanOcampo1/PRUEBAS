@@ -821,7 +821,7 @@ def menciona_catalogo(texto: str) -> bool:
         "quiero ver", "ver productos", "mostrar productos",
         "ver lo que tienes", "ver tenis", "muéstrame",
         "mostrar lo que tienes", "tenis disponibles",
-        "enséñame el catálogo", "catálogos", "mandame el catalogo",
+        "enséñame el catálogo", "Tienes imagenes", "mandame el catalogo",
         "quiero ver modelos", "ver referencias", "quiero referencias",
         "muestrame los modelos", "qué modelos tienes", "que modelos hay",
         "que tienes", "mandame fotos", "mandame las imagenes",
@@ -892,7 +892,7 @@ async def enviar_welcome_venom(cid: str):
                 },
                 {
                     "type": "text",
-                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor"
+                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en que te ayudo"
                 }
             ]
         }
@@ -1678,6 +1678,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     est = estado_usuario[cid]
     inv = obtener_inventario()
+    tallas = obtener_tallas_por_color_alias(inv, est.get("modelo", ""), est.get("color", ""))
+    if isinstance(tallas, (int, float, str)):
+        tallas = [str(tallas)]
 
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
@@ -1704,20 +1707,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         est["fase"] = "inicio"
         return
+
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
     # ─────────────────────────────────────────────
     texto_normalizado = normalize(txt)
 
     frases_desconfianza = [
-        "no confio", "desconfio", "me han robado", "me robaron", "ya me robaron", "me tumbaron",
+        "no confio", "desconfio", "me han robado", "PERO YO COMO SE QUE NO ME VAN A ROBAR", "ya me robaron", "me tumbaron",
         "me estafaron", "ya me estafaron", "me hicieron el robo", "no quiero pagar antes",
         "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
         "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
         "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "prefiero contraentrega",
         "quiero pagar al recibir", "pago al recibir", "solo contraentrega", "pago cuando llegue",
-        "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue", "me tumbaron una vez",
-        "me jodieron", "ya me tumbaron", "no vuelvo a caer", "ya me paso una vez", "eso me paso antes",
+        "cuando me lleguen pago", "Como se que no me van a robar", "pago cuando me llegue", "me tumbaron una vez",
+        "me jodieron", "ya me tumbaron", "no vuelvo a caer", "yo como se que no me roban", "eso me paso antes",
         "no me sale el mensaje", "no me abre el link", "me han robado antes", "me da cosa pagar",
         "no puedo pagar sin saber", "no mando dinero asi", "no conozco su tienda", "no estoy seguro",
         "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable?",
@@ -1786,15 +1790,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ──────────────────────────────────────────────────────
     if est.get("fase") == "esperando_datos_pago_posterior":
         try:
-            lineas = txt.splitlines()
-            nombre = lineas[0].strip() if len(lineas) > 0 else ""
-            modelo = lineas[1].strip() if len(lineas) > 1 else ""
-            dia_hora = lineas[2].strip() if len(lineas) > 2 else ""
+            texto_limpio = txt.replace("\n", " ").strip()
+
+            # Extraer modelo (número de 3 o 4 cifras)
+            modelo = re.search(r"\b\d{3,4}\b", texto_limpio)
+            modelo = modelo.group(0) if modelo else ""
+
+            # Extraer nombre: lo que va antes del modelo
+            nombre = texto_limpio.split(modelo)[0].strip() if modelo else texto_limpio[:25].strip()
+
+            # Extraer día/hora desde la palabra clave
+            dia_hora = ""
+            match_dia = re.search(r"(mañana|hoy|el\s+dia\s+\d+|el\s+\d+|día\s+\d+|a\s+las\s+\d+)", texto_limpio, re.IGNORECASE)
+            if match_dia:
+                dia_hora = texto_limpio[match_dia.start():].strip()
 
             if nombre and modelo and dia_hora:
                 guardar_en_pendientes({
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "nombre": nombre,
+                    "nombre": nombre.title(),
                     "telefono": cid,
                     "modelo": modelo,
                     "dia_hora": dia_hora
@@ -1802,7 +1816,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=f"✅ ¡Listo {nombre}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
+                    text=f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
                 )
                 est["fase"] = "inicial"
                 estado_usuario[cid] = est
@@ -1826,6 +1840,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
             )
             return
+
     # ─────────────────────────────────────────────
     # 📍 DETECTAR SI ES DE BUCARAMANGA (GLOBAL)
     # ─────────────────────────────────────────────
