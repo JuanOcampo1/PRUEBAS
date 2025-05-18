@@ -1707,7 +1707,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
     # ─────────────────────────────────────────────
-    texto_normalizado = normalize(body)
+    texto_normalizado = normalize(txt)
+
     frases_desconfianza = [
         "no confio", "desconfio", "me han robado", "me robaron", "ya me robaron", "me tumbaron",
         "me estafaron", "ya me estafaron", "me hicieron el robo", "no quiero pagar antes",
