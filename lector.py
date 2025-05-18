@@ -790,31 +790,45 @@ SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
-async def enviar_welcome(cid, ctx):
+async def enviar_welcome_venom(cid: str):
     try:
-        await ctx.bot.send_audio(
-            chat_id=cid,
-            audio=open("/var/data/audios/bienvenida/bienvenida1.mp3", "rb"),
-            caption="🎧 Escucha este audio de bienvenida.",
-            parse_mode="Markdown"
-        )
+        audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
+        with open(audio_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        return {
+            "type": "multi",
+            "messages": [
+                {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "bienvenida1.mp3",
+                    "text": "🎧 Escucha este audio de bienvenida."
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "👇🏻 *AQUÍ ESTÁ EL CATÁLOGO* 🆕\n"
+                        "Sigue este enlace para ver la última colección 👟 X💯:\n"
+                        "https://wa.me/c/573007607245"
+                    ),
+                    "parse_mode": "Markdown"
+                },
+                {
+                    "type": "text",
+                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor"
+                }
+            ]
+        }
+
     except Exception as e:
-        logging.error(f"❌ No se pudo enviar el audio de bienvenida: {e}")
+        logging.error(f"❌ Error al preparar audio bienvenida: {e}")
+        return {
+            "type": "text",
+            "text": "❌ Hubo un error enviando el mensaje de bienvenida."
+        }
 
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text=(
-            "👇🏻 *AQUÍ ESTÁ EL CATÁLOGO* 🆕\n"
-            "Sigue este enlace para ver la ultima colección 👟 X💯:\n"
-            "https://wa.me/c/573007607245"
-        ),
-        parse_mode="Markdown"
-    )
-
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text="🙋‍♂️ Dime tu nombre y ciudad por favor"
-    )
 
 CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
