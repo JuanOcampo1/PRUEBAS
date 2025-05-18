@@ -130,6 +130,50 @@ def get_drive_service():
  
     return build("drive", "v3", credentials=creds)
 
+def descargar_imagen_lengueta():
+    """
+    Descarga la imagen de ejemplo de lengüeta desde Google Drive.
+    Guarda el archivo como /var/data/extra/lengueta_ejemplo.jpg
+    """
+    try:
+        print(">>> descargar_imagen_lengueta() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/extra", exist_ok=True)
+
+        archivo = service.files().list(
+            q="'1GF3rdTM0t81KRIb6xbQ1uNV4uC4A7LvE' in parents and name = 'lengueta_ejemplo.jpg' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivo:
+            logging.warning("⚠️ No se encontró 'lengueta_ejemplo.jpg'")
+            return
+
+        file_id = archivo[0]["id"]
+        destino = "/var/data/extra/lengueta_ejemplo.jpg"
+
+        if os.path.exists(destino):
+            logging.info("📦 Imagen de lengüeta ya existe. Omitiendo descarga.")
+            return
+
+        logging.info("⬇️ Descargando imagen de lengüeta")
+        request = service.files().get_media(fileId=file_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Imagen guardada en: {destino}")
+
+    except Exception as e:
+        logging.error(f"❌ Error descargando imagen de lengüeta: {e}")
+
 CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
 
 def descargar_audios_bienvenida_drive():
@@ -770,13 +814,44 @@ def convertir_palabras_a_numero(texto):
 
 def menciona_catalogo(texto: str) -> bool:
     texto = normalize(texto)
-    claves = [
+
+    # Frases que deberían activar el catálogo
+    claves_exactas = [
         "catalogo", "catálogo", "ver catálogo", "mostrar catálogo",
         "quiero ver", "ver productos", "mostrar productos",
         "ver lo que tienes", "ver tenis", "muéstrame",
-        "mostrar lo que tienes", "tenis disponibles"
+        "mostrar lo que tienes", "tenis disponibles",
+        "enséñame el catálogo", "catálogos", "mandame el catalogo",
+        "quiero ver modelos", "ver referencias", "quiero referencias",
+        "muestrame los modelos", "qué modelos tienes", "que modelos hay",
+        "que tienes", "mandame fotos", "mandame las imagenes",
+        "envíame modelos", "quiero ver imágenes", "tenis que tienes",
+        "que hay", "quiero ver los pares", "muestra los tenis",
+        "cuales modelos tienes", "que pares hay"
     ]
-    return any(palabra in texto for palabra in claves)
+
+    # Variantes mal escritas
+    claves_con_errores = [
+        "catlogo", "catálog", "katalogo", "catalogoo",
+        "ver katalago", "mostar catalogo", "ber catalogo",
+        "muestrame modelos", "quiero bber", "mandame katalago",
+        "quero ver modelos", "quiero bel modelos", "kiero bel",
+        "mandame modeloss", "ver referensias", "enseñame loq tienes"
+    ]
+
+    # Combinar y verificar coincidencia directa
+    todas = claves_exactas + claves_con_errores
+    if any(fr in texto for fr in todas):
+        return True
+
+    # Extra: buscar coincidencias similares si no hubo match directo
+    for frase in todas:
+        similares = difflib.get_close_matches(texto, [frase], n=1, cutoff=0.85)
+        if similares:
+            return True
+
+    return False
+
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -1629,6 +1704,63 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         est["fase"] = "inicio"
         return
+    # ─────────────────────────────────────────────
+    # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
+    # ─────────────────────────────────────────────
+    texto_normalizado = normalize(body)
+    frases_desconfianza = [
+        "no confio", "desconfio", "me han robado", "me robaron", "ya me robaron", "me tumbaron",
+        "me estafaron", "ya me estafaron", "me hicieron el robo", "no quiero pagar antes",
+        "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
+        "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
+        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "prefiero contraentrega",
+        "quiero pagar al recibir", "pago al recibir", "solo contraentrega", "pago cuando llegue",
+        "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue", "me tumbaron una vez",
+        "me jodieron", "ya me tumbaron", "no vuelvo a caer", "ya me paso una vez", "eso me paso antes",
+        "no me sale el mensaje", "no me abre el link", "me han robado antes", "me da cosa pagar",
+        "no puedo pagar sin saber", "no mando dinero asi", "no conozco su tienda", "no estoy seguro",
+        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable?",
+        "no tengo pruebas", "es seguro esto?", "no me siento comodo pagando", "mejor contraentrega",
+        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "me estafaron antes",
+        "me robaron antes", "y si no me llega", "y si no llega", "y si me estafan", "y si es falso",
+        "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
+        "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro", "y si es mentira",
+        "y si es estafa", "robo", "yo no pago sin ver", "yo no mando plata asi", "robado",
+        "esto parece raro", "y si no cumplen", "y si no es verdad", "parece una estafa", "se ve raro",
+        "esto huele a estafa", "muy sospechoso", "no quiero perder plata", "no me arriesgo",
+        "no voy a arriesgar mi dinero"
+    ]
+
+    if any(frase in texto_normalizado for frase in frases_desconfianza):
+        video_path = "/var/data/videos/video_confianza.mp4"
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
+            parse_mode="Markdown"
+        )
+
+        if os.path.exists(video_path):
+            with open(video_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "video",
+                "base64": b64,
+                "mimetype": "video/mp4",
+                "filename": "video_confianza.mp4",
+                "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria."
+            }
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
+                parse_mode="Markdown"
+            )
+
+        await reanudar_fase_actual(cid, ctx, est)
+        return
+
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
     # ──────────────────────────────────────────────────────
@@ -1652,77 +1784,66 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 📋 RECOLECCIÓN DE DATOS PARA LA HOJA "PENDIENTES"
     # ──────────────────────────────────────────────────────
     if est.get("fase") == "esperando_datos_pago_posterior":
-        guardar_en_pendientes({
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "nombre": extraer_nombre(txt),
-            "telefono": cid,
-            "modelo": extraer_modelo(txt),
-            "dia_hora": extraer_dia_hora(txt)
-        })
+        try:
+            lineas = txt.splitlines()
+            nombre = lineas[0].strip() if len(lineas) > 0 else ""
+            modelo = lineas[1].strip() if len(lineas) > 1 else ""
+            dia_hora = lineas[2].strip() if len(lineas) > 2 else ""
 
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Listo! Te escribiremos ese día para ayudarte a cerrar la compra. Gracias por tu interés 🔥"
-        )
-        est["fase"] = "inicial"
-        estado_usuario[cid] = est
-        return
+            if nombre and modelo and dia_hora:
+                guardar_en_pendientes({
+                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "nombre": nombre,
+                    "telefono": cid,
+                    "modelo": modelo,
+                    "dia_hora": dia_hora
+                })
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=f"✅ ¡Listo {nombre}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
+                )
+                est["fase"] = "inicial"
+                estado_usuario[cid] = est
+                return
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "❌ Para agendar tu pago necesito 3 cosas:\n"
+                        "1️⃣ Tu *nombre*\n2️⃣ El *modelo* que te gustó\n3️⃣ *Día y hora* estimada de pago\n\n"
+                        "Ejemplo:\nJuan\nDS 298\nMañana a las 2"
+                    ),
+                    parse_mode="Markdown"
+                )
+                return
+
+        except Exception as e:
+            logging.error(f"[PENDIENTES] ❌ Error registrando pago posterior: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
+            )
+            return
     # ─────────────────────────────────────────────
-    # 💾 GUARDAR SI ES DE BUCARAMANGA (NO RESPONDER)
+    # 📍 DETECTAR SI ES DE BUCARAMANGA (GLOBAL)
     # ─────────────────────────────────────────────
     if not est.get("es_de_bucaramanga") and any(b in txt for b in ["bucaramanga", "bga", "b/manga"]):
         est["es_de_bucaramanga"] = True
         estado_usuario[cid] = est
         logging.info(f"📍 Cliente {cid} es de Bucaramanga")
 
-    if est.get("fase") == "esperando_pago":
-        if est.get("es_de_bucaramanga"):
+        if est.get("fase") == "inicio":
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    "💳 Como estás en *Bucaramanga*, puedes pagar cuando recibas tu pedido 🛵 "
-                    "o recogerlo en nuestra tienda 🏪\n\n"
-                    "¿Qué prefieres? *Domiciliario* o *Recoger en tienda*"
+                    "📍 ¡Genial! Como estás en *Bucaramanga*, más adelante podrás elegir entre *pago contra entrega* 🛵 "
+                    "o *recoger en tienda* 🏪.\n\n"
+                    "Continuemos con tu pedido 👟"
                 ),
                 parse_mode="Markdown"
             )
-            est["fase"] = "esperando_metodo_bucaramanga"
-            estado_usuario[cid] = est
             return
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="💳 Para confirmar el pedido requerimos un anticipo de $35.000. ¿Cómo deseas pagarlo?"
-            )
-            est["fase"] = "esperando_pago_normal"
-            estado_usuario[cid] = est
-            return
-
-    if est.get("fase") == "esperando_metodo_bucaramanga":
-        if "domicilio" in txt or "domiciliario" in txt:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🛵 Perfecto, tu pedido está en camino a tu casa. Pagarás al recibir. ¡Gracias por tu compra!"
-            )
-            guardar_en_pedidos(est, cid, "🚚 Bucaramanga — Domicilio")
-
-        elif "tienda" in txt or "recoger" in txt:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🏪 Perfecto, ya te reservamos tu par de tenis. Puedes recogerlo en nuestra tienda física. ¡Gracias por tu compra!"
-            )
-            guardar_en_pedidos(est, cid, "🏪 Bucaramanga — Recoge en tienda")
-
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Prefieres *domiciliario* o *recoger en tienda*? 🛵🏪"
-            )
-            return
-
-        est["fase"] = "inicial"
-        estado_usuario[cid] = est
-        return
 
 
     # 🎬 Petición de video — general o específica
@@ -2081,70 +2202,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # 📦 FAQ 4: Frases comunes de desconfianza (antes del uso)
-        frases_desconfianza = [
-                "no confio", "desconfio",
-                "me han robado", "me robaron", "ya me robaron", "me tumbaron",
-                "me estafaron", "ya me estafaron", "me hicieron el robo",
-                "no quiero pagar antes", "no quiero pagar anticipado",
-                "no quiero dar plata antes", "no quiero enviar dinero sin ver",
-                "me da desconfianza", "me da miedo pagar", "no me da confianza",
-                "me han tumbado", "me hicieron fraude", "tengo miedo de pagar",
-                "no tengo seguridad", "prefiero contraentrega", "quiero pagar al recibir",
-                "pago al recibir", "solo contraentrega", "pago cuando llegue",
-                "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue",
-                "me tumbaron una vez", "me jodieron", "ya me tumbaron",
-                "no vuelvo a caer", "ya me paso una vez", "eso me paso antes",
-                "no me sale el mensaje", "no me abre el link", "me han robado antes",
-                "me da cosa pagar", "no puedo pagar sin saber", "no mando dinero asi",
-                "no conozco su tienda", "no estoy seguro", "como se que es real",
-                "como se que es confiable", "como saber si es real", "esto es confiable?",
-                "no tengo pruebas", "es seguro esto?", "no me siento comodo pagando",
-                "mejor contraentrega", "yo solo pago al recibir", "yo no pago antes",
-                "a mi me han estafado", "me estafaron antes", "me robaron antes",
-                "y si no me llega", "y si no llega", "y si me estafan", "y si es falso",
-                "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
-                "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro",
-                "y si es mentira", "y si es estafa", "robo",
-                "yo no pago sin ver", "yo no mando plata asi", "robado",
-                "esto parece raro", "y si no cumplen", "y si no es verdad",
-                "parece una estafa", "se ve raro", "esto huele a estafa", "muy sospechoso",
-                "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
-        ]
-
-        if any(frase in texto_normalizado for frase in frases_desconfianza):
-            video_path = "/var/data/videos/video_confianza.mp4"
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
-                parse_mode="Markdown"
-            )
-
-            if os.path.exists(video_path):
-                with open(video_path, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-
-                return {
-                    "type": "video",
-                    "base64": b64,
-                    "mimetype": "video/mp4",
-                    "filename": "video_confianza.mp4",
-                    "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria."
-                }
-            else:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
-                    parse_mode="Markdown"
-                )
-
-            await reanudar_fase_actual(cid, ctx, est)
-            return
-
-
-
-
     # FAQ 5: ¿Dónde están ubicados?
     if est.get("fase") not in ("editando_dato", "esperando_direccion", "confirmar_datos_guardados"):
         if any(frase in txt for frase in (
@@ -2371,37 +2428,83 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
-            match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
-            if match_talla:
-                talla_cliente = match_talla.group(1) or match_talla.group(2)
-                if talla_cliente in tallas:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
-                            "📸 Pero para estar más seguros, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
-                        ),
-                        parse_mode="Markdown"
-                    )
-                else:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=f"❌ Lo siento, no tenemos disponible la talla *{talla_cliente}* para ese modelo.",
-                        parse_mode="Markdown"
-                    )
+    # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
+    match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
+    if match_talla:
+        talla_cliente = match_talla.group(1) or match_talla.group(2)
+        if talla_cliente in tallas:
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                    return {
+                        "type": "multi",
+                        "messages": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
+                                    "📸 Pero para estar más seguros, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
+                                ),
+                                "parse_mode": "Markdown"
+                            },
+                            {
+                                "type": "photo",
+                                "base64": f"data:image/jpeg;base64,{b64}",
+                                "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                            }
+                        ]
+                    }
+            else:
+                return {
+                    "type": "text",
+                    "text": (
+                        f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
+                        "📸 Pero no encontré la imagen de ejemplo, por favor envíame una foto de la lengüeta."
+                    ),
+                    "parse_mode": "Markdown"
+                }
 
-            # Continuar con el flujo normal sin botones
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
-                ),
-                parse_mode="Markdown"
-            )
-            return
+        else:
+            return {
+                "type": "text",
+                "text": f"❌ Lo siento, no tenemos disponible la talla *{talla_cliente}* para ese modelo.",
+                "parse_mode": "Markdown"
+            }
+
+    # Continuar con el flujo normal sin botones
+    ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+    if os.path.exists(ruta):
+        with open(ruta, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+            return {
+                "type": "multi",
+                "messages": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                            f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                            "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                        ),
+                        "parse_mode": "Markdown"
+                    },
+                    {
+                        "type": "photo",
+                        "base64": f"data:image/jpeg;base64,{b64}",
+                        "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                    }
+                ]
+            }
+    else:
+        return {
+            "type": "text",
+            "text": (
+                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
+            ),
+            "parse_mode": "Markdown"
+        }
 
 
 
@@ -2816,6 +2919,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Estado": "PENDIENTE"
         }
 
+    # ────────────────────────────────────────────────
+    # 💳 MÉTODO DE PAGO – RESUMEN PERSONALIZADO
+    # ────────────────────────────────────────────────
+    if est.get("fase") == "resumen_compra":
         msg = (
             f"✅ Pedido: {est['sale_id']}\n"
             f"👤Nombre: {est['nombre']}\n"
@@ -2824,13 +2931,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
             f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
             f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-            "¿Cómo deseas hacer el pago?\n"
-            "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
-            "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
-            "Escribe *Transferencia* o *Contraentrega*."
         )
+
+        if est.get("es_de_bucaramanga"):
+            msg += (
+                "📍 Como estás en *Bucaramanga*, puedes elegir:\n"
+                "• 🛵 *Domicilio*: te lo llevamos y pagas al recibir\n"
+                "• 🏪 *Tienda*: puedes pasar a recogerlo tú mismo\n\n"
+                "¿Qué prefieres? Escribe *domicilio* o *tienda*"
+            )
+            est["fase"] = "esperando_metodo_bucaramanga"
+        else:
+            msg += (
+                "¿Cómo deseas hacer el pago?\n"
+                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
+                "Escribe *Transferencia* o *Contraentrega*."
+            )
+            est["fase"] = "esperando_pago"
+
         await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
-        est["fase"] = "esperando_pago"
         estado_usuario[cid] = est
         return
 
@@ -2904,6 +3024,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         estado_usuario[cid] = est
         return
+
 
     # 📸 Recibir comprobante de pago
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
@@ -3264,24 +3385,60 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     return
 # ─────────────────────────────────────────
-# FUNCIÓN AUXILIAR – REANUDAR FASE
+# FUNCIÓN AUXILIAR – REANUDAR FASE ACTUAL
 # ─────────────────────────────────────────
 async def reanudar_fase_actual(cid, ctx, est):
     fase = est.get("fase")
+
     if fase == "esperando_nombre":
         await ctx.bot.send_message(chat_id=cid, text="¿Dime tu nombre completo para seguir la compra? ✍️")
+
     elif fase == "esperando_correo":
-        await ctx.bot.send_message(chat_id=cid, text="¿Dime cual es tu correo para seguir? 📧")
+        await ctx.bot.send_message(chat_id=cid, text="¿Dime cuál es tu correo para seguir? 📧")
+
     elif fase == "esperando_telefono":
-        await ctx.bot.send_message(chat_id=cid, text="¿Tu telefono celular para continuar? 📱")
+        await ctx.bot.send_message(chat_id=cid, text="¿Tu teléfono celular para continuar? 📱")
+
     elif fase == "esperando_cedula":
-        await ctx.bot.send_message(chat_id=cid, text="¿Dime la cedula para que sigamos ? 🪪")
+        await ctx.bot.send_message(chat_id=cid, text="¿Dime la cédula para que sigamos? 🪪")
+
     elif fase == "esperando_ciudad":
         await ctx.bot.send_message(chat_id=cid, text="¿Dime la ciudad para ya cerrar tu pedido? 🏙️")
+
     elif fase == "esperando_provincia":
         await ctx.bot.send_message(chat_id=cid, text="¿Dime el Departamento o provincia? 🏞️")
+
     elif fase == "esperando_direccion":
-        await ctx.bot.send_message(chat_id=cid, text="¿Cual es entonces tu direccion para el pedido? 🏡")
+        await ctx.bot.send_message(chat_id=cid, text="¿Cuál es entonces tu dirección para el pedido? 🏡")
+
+    elif fase == "esperando_pago":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Cómo deseas pagar? Escribe *transferencia* o *contraentrega*.",
+            parse_mode="Markdown"
+        )
+
+    elif fase == "esperando_comprobante":
+        await ctx.bot.send_message(chat_id=cid, text="📸 Por favor, envíame el comprobante de pago.")
+
+    elif fase == "esperando_talla":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="📏 ¿Cuál es tu talla? O si prefieres, mándame una foto de la lengüeta del zapato para ayudarte automáticamente."
+        )
+
+    elif fase == "esperando_color":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="🎨 ¿Qué color te gustaría para ese modelo? Puedes decirme por ejemplo 'negros', 'blancos', etc."
+        )
+
+    elif fase == "confirmar_datos_guardados":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¿Estos datos están correctos o deseas cambiar algo? Escribe 'sí son correctos' o dime qué deseas modificar."
+        )
+
 
 # Función para manejar la solicitud de precio por referencia
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
@@ -3555,11 +3712,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
-    # 💬 Saludo / start
     if texto in ("/start", "start", "hola", "buenas", "hey"):
         reset_estado(cid)
-        await enviar_welcome(cid, ctx)
-        return
+        return await enviar_welcome_venom(cid)
 
 
     # 🔊 Petición de audio
@@ -3880,6 +4035,7 @@ if __name__ == "__main__":
     descargar_stickers_drive()
     descargar_video_confianza()
     descargar_audios_bienvenida_drive()
+    descargar_imagen_lengueta()
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
