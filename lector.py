@@ -2552,86 +2552,87 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_confirmacion_envio" and txt in ("sí", "si", "claro", "continuemos", "dale"):
         est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
-        return await procesar_wa(cid, "sí")
+        return await procesar_wa(cid, "confirmar talla detectada")
 
 
     # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
-    match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
-    if match_talla:
-        talla_cliente = match_talla.group(1) or match_talla.group(2)
-        if talla_cliente in tallas:
-            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-            if os.path.exists(ruta):
-                with open(ruta, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
+    if est.get("fase") == "esperando_talla":
+        match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
+        if match_talla:
+            talla_cliente = match_talla.group(1) or match_talla.group(2)
+            if talla_cliente in tallas:
+                ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+                if os.path.exists(ruta):
+                    with open(ruta, "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode("utf-8")
+                        return {
+                            "type": "multi",
+                            "messages": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
+                                        "📸 Pero para estar más seguros, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
+                                    ),
+                                    "parse_mode": "Markdown"
+                                },
+                                {
+                                    "type": "photo",
+                                    "base64": f"data:image/jpeg;base64,{b64}",
+                                    "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                                }
+                            ]
+                        }
+                else:
                     return {
-                        "type": "multi",
-                        "messages": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
-                                    "📸 Pero para estar más seguros, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
-                                ),
-                                "parse_mode": "Markdown"
-                            },
-                            {
-                                "type": "photo",
-                                "base64": f"data:image/jpeg;base64,{b64}",
-                                "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                            }
-                        ]
+                        "type": "text",
+                        "text": (
+                            f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
+                            "📸 Pero no encontré la imagen de ejemplo, por favor envíame una foto de la lengüeta."
+                        ),
+                        "parse_mode": "Markdown"
                     }
             else:
                 return {
                     "type": "text",
-                    "text": (
-                        f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
-                        "📸 Pero no encontré la imagen de ejemplo, por favor envíame una foto de la lengüeta."
-                    ),
+                    "text": f"❌ Lo siento, no tenemos disponible la talla *{talla_cliente}* para ese modelo.",
                     "parse_mode": "Markdown"
                 }
 
+        # Continuar con el flujo normal sin botones
+        ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+        if os.path.exists(ruta):
+            with open(ruta, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                                "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
+                }
         else:
             return {
                 "type": "text",
-                "text": f"❌ Lo siento, no tenemos disponible la talla *{talla_cliente}* para ese modelo.",
+                "text": (
+                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                    "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
+                ),
                 "parse_mode": "Markdown"
             }
 
-    # Continuar con el flujo normal sin botones
-    ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-    if os.path.exists(ruta):
-        with open(ruta, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-            return {
-                "type": "multi",
-                "messages": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                            f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                            "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
-                        ),
-                        "parse_mode": "Markdown"
-                    },
-                    {
-                        "type": "photo",
-                        "base64": f"data:image/jpeg;base64,{b64}",
-                        "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                    }
-                ]
-            }
-    else:
-        return {
-            "type": "text",
-            "text": (
-                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
-            ),
-            "parse_mode": "Markdown"
-        }
 
 
 
