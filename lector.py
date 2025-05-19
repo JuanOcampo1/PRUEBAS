@@ -1439,6 +1439,14 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
                 data.get("Producto", "No informado"),
                 data.get("Pago", "No indicado")  # Se usa "Pago" como campo 'Día/Hora contacto'
             ]
+        elif destino == "ADDI":
+            fila = [
+                fecha_actual,
+                data.get("Cliente", "No informado"),
+                data.get("Cédula", "No informada"),
+                data.get("Teléfono", "No informado"),
+                data.get("Correo", "No informado"),
+            ]
         else:
             logging.error(f"[SHEETS] ❌ Hoja desconocida: {destino}")
             return False
@@ -1451,6 +1459,7 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
     except Exception as e:
         logging.exception(f"[SHEETS] ❌ Error escribiendo en hoja '{destino}': {e}")
         return False
+
 
 
 # ───────────────────────────────────────────────────────────────
@@ -1953,7 +1962,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    "📍 ¡Genial! Como estás en *Bucaramanga*, más adelante podrás elegir entre *pago contra entrega* 🛵 "
+                    "📍 ¡Genial! Como estás en *Bucaramanga*, más adelante podrás elegir entre *que lo envie un domiciliario* 🛵 "
                     "o *recoger en tienda* 🏪.\n\n"
                     "Continuemos con tu pedido 👟"
                 ),
@@ -3034,9 +3043,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             msg += (
                 "¿Cómo deseas hacer el pago?\n"
-                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
-                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
-                "Escribe *Transferencia* o *Contraentrega*."
+                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
+                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
+                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
             )
             est["fase"] = "esperando_pago"
 
@@ -3044,11 +3054,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
         return
 
-    # 💳 Método de pago
+    # ────────────────────────────────────────────────
+    # 💳 MÉTODO DE PAGO – ELECCIÓN
+    # ────────────────────────────────────────────────
     if est.get("fase") == "esperando_pago":
         opciones = {
             "transferencia": ["transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr"],
-            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"]
+            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"],
+            "addi": ["addi", "pagar con addi", "credito", "crédito", "financiacion", "financiación"]
         }
         txt_normalizado = normalize(txt_raw)
         metodo_detectado = None
@@ -3060,7 +3073,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 No entendí el método de pago. Escribe *transferencia* o *contraentrega* 😊",
+                text="💳 No entendí el método de pago. Escribe *transferencia*, *contraentrega* o *Addi* 😊",
                 parse_mode="Markdown"
             )
             return
@@ -3068,6 +3081,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         resumen = est["resumen"]
         precio_original = est["precio_total"]
 
+        # ─── TRANSFERENCIA ────────────────────────────
         if metodo_detectado == "transferencia":
             est["fase"] = "esperando_comprobante"
             est["metodo_pago"] = "Transferencia"
@@ -3083,17 +3097,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             msg = (
                 "🟢 Elegiste *TRANSFERENCIA*.\n\n"
                 f"💰 Valor original: {precio_original:,} COP\n"
-                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
+                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
                 f"✅ Total a pagar: {valor_final:,} COP\n\n"
                 "💳 Cuentas:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 317 717 1171\n"
-                "- Daviplata 300 414 1021\n\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 317 717 1171\n"
+                "- Daviplata 300 414 1021\n\n"
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
 
-        else:
+        # ─── CONTRAENTREGA ────────────────────────────
+        elif metodo_detectado == "contraentrega":
             est["fase"] = "esperando_comprobante"
             est["metodo_pago"] = "Contraentrega"
             resumen.update({
@@ -3103,17 +3118,122 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             msg = (
                 "🟡 Elegiste *CONTRAENTREGA*.\n\n"
-                "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
+                "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
                 "💳 Cuentas:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 317 717 1171\n"
-                "- Daviplata 300 414 1021\n\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 317 717 1171\n"
+                "- Daviplata 300 414 1021\n\n"
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
 
+    # ────────────────────────────────────────────────
+    # ⏸️ PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
+    # ────────────────────────────────────────────────
+    #   Coloca esto al inicio de tu manejador, justo después de obtener `est`
+    #   para que ningún mensaje siga fluyendo mientras dure la pausa.
+    #
+    if est.get("pausa_hasta"):
+        pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
+        if datetime.now() < pausa_hasta:
+            logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
+            return {"status": "paused"}            # Venom/cliente no hará nada
+        else:
+            # Expiró la pausa; restablece el flujo normal
+            est.pop("pausa_hasta", None)
+            if est.get("fase", "").startswith("pausado_"):
+                est["fase"] = "inicial"
+            estado_usuario[cid] = est
+    # ────────────────────────────────────────────────
+
+
+    # ────────────────────────────────────────────────
+    # 💳 MÉTODO DE PAGO – OPCIÓN ADDI (CRÉDITO)
+    # ────────────────────────────────────────────────
+    elif metodo_detectado == "addi":
+        est["fase"] = "esperando_datos_addi"
+        est["metodo_pago"] = "Addi"
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🟦 Elegiste *Addi* para financiar tu compra.\n\n"
+                "Por favor envíame los siguientes datos (cada uno en una línea):\n"
+                "1️⃣ Nombre completo\n"
+                "2️⃣ Número de cédula\n"
+                "3️⃣ Correo electrónico\n"
+                "4️⃣ Teléfono WhatsApp\n\n"
+                "_La aprobación está sujeta a políticas de Addi y centrales de riesgo._"
+            ),
+            parse_mode="Markdown"
+        )
+
         estado_usuario[cid] = est
         return
+
+
+    # ────────────────────────────────────────────────
+    # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
+    # ────────────────────────────────────────────────
+    if est.get("fase") == "esperando_datos_addi":
+        try:
+            partes   = [p.strip() for p in txt_raw.splitlines() if p.strip()]
+            nombre   = partes[0] if len(partes) >= 1 else ""
+            cedula   = re.search(r"\b\d{6,12}\b", partes[1] if len(partes) >= 2 else "")
+            correo   = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", partes[2] if len(partes) >= 3 else "")
+            telefono = re.search(r"\b3\d{9}\b", partes[3] if len(partes) >= 4 else "")
+
+            if not (nombre and cedula and correo and telefono):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "❌ Faltan datos o hay un formato incorrecto.\n\n"
+                        "Envíame 4 líneas así:\n"
+                        "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
+                    ),
+                    parse_mode="Markdown"
+                )
+                return
+
+            datos_addi = {
+                "Cliente":   nombre.title(),
+                "Cédula":    cedula.group(0),
+                "Correo":    correo.group(0),
+                "Teléfono":  telefono.group(0),
+                "Producto": f"{est.get('modelo','')} {est.get('color','')}".strip(),
+                "Talla":     est.get("talla", ""),
+                "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+            if registrar_orden_unificada(datos_addi, destino="ADDI"):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
+                        "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
+                    )
+                )
+                # 🔒 Pausa el bot por 24 h para que solo intervenga un humano
+                est["fase"] = "pausado_addi"
+                est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
+                estado_usuario[cid] = est
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
+                )
+            return
+
+        except Exception as e:
+            logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
+            )
+            return
+
+
+
 
 
     # 📸 Recibir comprobante de pago
@@ -3932,10 +4052,54 @@ async def venom_webhook(req: Request):
             fase = est.get("fase", "")
             logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
-            # 📄 COMPROBANTE
+            # 3️⃣ COMPROBANTE -------------------------------------------------
             if fase == "esperando_comprobante":
-                # ... (ya lo tienes implementado y funciona) ...
-                pass
+                try:
+                    os.makedirs("temp", exist_ok=True)
+                    temp_path = f"temp/{cid}_proof.jpg"
+                    with open(temp_path, "wb") as f:
+                        f.write(img_bytes)
+
+                    texto = extraer_texto_comprobante(temp_path)
+                    logging.info(f"[OCR] Texto extraído (500 chars):\n{texto[:500]}")
+
+                    if es_comprobante_valido(texto):
+                        logging.info("✅ Comprobante válido por OCR")
+                        resumen = est.get("resumen", {})
+                        registrar_orden(resumen)
+
+                        enviar_correo(
+                            est["correo"],
+                            f"Pago recibido {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2)
+                        )
+                        enviar_correo_con_adjunto(
+                            EMAIL_JEFE,
+                            f"Comprobante {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2),
+                            temp_path
+                        )
+                        os.remove(temp_path)
+                        reset_estado(cid)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"
+                        })
+                    else:
+                        os.remove(temp_path)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso'."
+                        })
+
+                except Exception as e:
+                    logging.error(f"❌ Error al procesar comprobante: {e}")
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
+                    })
+
+
 
             # 👟 LENGÜETA - detectar talla si está esperando_talla
             elif fase == "esperando_talla":
