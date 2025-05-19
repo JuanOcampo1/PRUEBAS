@@ -86,53 +86,52 @@ def registrar_o_actualizar_lead(data: dict) -> bool:
     from oauth2client.service_account import ServiceAccountCredentials
 
     try:
+        logging.info("[LEADS] ⇢ Intentando registrar o actualizar lead...")
+        logging.info(f"[LEADS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+
         creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
 
         sheet = client.open("PEDIDOS").worksheet("LEADS")
-        telefono = data.get("Teléfono", "")
+        telefono = data.get("Teléfono", "").strip()
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Buscar si ya existe un registro con ese teléfono
+        if not telefono:
+            logging.warning("[LEADS] ⚠️ Teléfono vacío. No se puede registrar.")
+            return False
+
         registros = sheet.col_values(1)  # Columna A: Teléfono
+        logging.info(f"[LEADS] 🔍 Total de registros existentes: {len(registros)}")
+
+        fila_data = [
+            telefono,
+            data.get("Fecha Registro", fecha),
+            data.get("Nombre", ""),
+            data.get("Producto", ""),
+            data.get("Color", ""),
+            data.get("Talla", ""),
+            data.get("Correo", ""),
+            data.get("Fase", ""),
+            data.get("Último Mensaje", ""),
+            data.get("Estado", "")
+        ]
+
         if telefono in registros:
-            fila_index = registros.index(telefono) + 1  # porque gspread es 1-indexed
-            sheet.update(f"A{fila_index}:J{fila_index}", [[
-                telefono,
-                data.get("Fecha Registro", fecha),
-                data.get("Nombre", ""),
-                data.get("Producto", ""),
-                data.get("Color", ""),
-                data.get("Talla", ""),
-                data.get("Correo", ""),
-                data.get("Fase", ""),
-                data.get("Último Mensaje", ""),
-                data.get("Estado", "")
-            ]])
+            fila_index = registros.index(telefono) + 1
+            sheet.update(f"A{fila_index}:J{fila_index}", [fila_data])
             logging.info(f"[LEADS] 🔁 Lead actualizado (fila {fila_index})")
         else:
-            # Si no existe, lo agrega como nuevo
-            sheet.append_row([
-                telefono,
-                data.get("Fecha Registro", fecha),
-                data.get("Nombre", ""),
-                data.get("Producto", ""),
-                data.get("Color", ""),
-                data.get("Talla", ""),
-                data.get("Correo", ""),
-                data.get("Fase", ""),
-                data.get("Último Mensaje", ""),
-                data.get("Estado", "")
-            ])
+            sheet.append_row(fila_data)
             logging.info("[LEADS] ✅ Lead registrado por primera vez")
 
         return True
 
     except Exception as e:
-        logging.error(f"[LEADS] ❌ Error registrando o actualizando lead: {e}")
+        logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
         return False
+
 
 def descargar_imagen_lengueta():
     """
@@ -1396,56 +1395,61 @@ async def manejar_imagen(update, ctx):
 # ───────────────────────────────────────────────────────────────
 
 def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
 
     try:
+        logging.info(f"[SHEETS] ⇢ Intentando registrar en hoja: {destino}")
+        logging.info(f"[SHEETS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+
         # Cargar credenciales desde variable de entorno
         creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
 
-        # Abrir el archivo de Sheets
-        sh = client.open("PEDIDOS")  # nombre del archivo
-        sheet = sh.worksheet(destino)  # nombre de la hoja
+        # Abrir archivo y hoja
+        sh = client.open("PEDIDOS")
+        sheet = sh.worksheet(destino)
 
-        # Fecha y hora exacta del registro (ahora)
+        # Fecha actual
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Armar fila según hoja destino
+        # Fila por tipo
         if destino == "PEDIDOS":
             fila = [
                 data.get("Número Venta", ""),
                 fecha_actual,
-                data.get("Cliente", ""),
-                data.get("Cédula", ""),
-                data.get("Teléfono", ""),
-                data.get("Producto", ""),
-                data.get("Color", ""),
-                data.get("Talla", ""),
-                data.get("Correo", ""),
-                data.get("Pago", ""),
-                data.get("fase_actual", ""),
-                data.get("Estado", "")
+                data.get("Cliente", "No informado"),
+                data.get("Cédula", "No informada"),
+                data.get("Teléfono", "No informado"),
+                data.get("Producto", "No informado"),
+                data.get("Color", "No informado"),
+                data.get("Talla", "No informada"),
+                data.get("Correo", "No informado"),
+                data.get("Pago", "No definido"),
+                data.get("fase_actual", "Sin registrar"),
+                data.get("Estado", "PENDIENTE")
             ]
         elif destino == "PENDIENTES":
             fila = [
                 fecha_actual,
-                data.get("Cliente", ""),
-                data.get("Teléfono", ""),
-                data.get("Producto", ""),
-                data.get("Pago", "")
+                data.get("Cliente", "No informado"),
+                data.get("Teléfono", "No informado"),
+                data.get("Producto", "No informado"),
+                data.get("Pago", "No indicado")  # Se usa "Pago" como campo 'Día/Hora contacto'
             ]
         else:
-            logging.error(f"[SHEETS] ❌ Hoja no reconocida: {destino}")
+            logging.error(f"[SHEETS] ❌ Hoja desconocida: {destino}")
             return False
 
-        # Escribir la fila
+        # Escribir
         sheet.append_row(fila)
-        logging.info(f"[SHEETS] ✅ Fila añadida correctamente en hoja '{destino}'")
+        logging.info(f"[SHEETS] ✅ Fila escrita correctamente en hoja '{destino}'")
         return True
 
     except Exception as e:
-        logging.error(f"[SHEETS] ❌ Error escribiendo en hoja '{destino}': {e}")
+        logging.exception(f"[SHEETS] ❌ Error escribiendo en hoja '{destino}': {e}")
         return False
 
 
