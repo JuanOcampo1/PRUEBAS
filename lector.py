@@ -1761,7 +1761,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     frases_desconfianza = [
         "no confio", "desconfio", "me han robado", "PERO YO COMO SE QUE NO ME VAN A ROBAR", "ya me robaron", "me tumbaron",
-        "me estafaron", "ya me estafaron", "me hicieron el robo", "no quiero pagar antes",
+        "me estafaron", "ya me estafaron", "me hicieron el robo", "como se que no me van a robar",
         "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
         "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
         "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "prefiero contraentrega",
@@ -1810,6 +1810,50 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         await reanudar_fase_actual(cid, ctx, est)
+        return
+
+
+    # 🟨 Detección universal de color desde fase "inicio"
+    if est.get("fase") in ("inicio", "haciendo_pedido") and any(color in txt for color in colores_alias):
+        color = detectar_color(txt)
+        if not color:
+            await ctx.bot.send_message(cid, "👀 ¿Qué color te interesa? No logré identificarlo.")
+            return
+
+        ruta = "/var/data/modelos_video"
+        if not os.path.exists(ruta):
+            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+            return
+
+        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
+        coincidencias = [
+            f for f in os.listdir(ruta)
+            if f.lower().endswith(".jpg")
+            and any(alias in f.lower() for alias in aliases_del_color)
+        ]
+
+        if not coincidencias:
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.")
+            return
+
+        for archivo in coincidencias:
+            try:
+                path = os.path.join(ruta, archivo)
+                modelo = archivo.replace(".jpg", "").replace("_", " ")
+                await ctx.bot.send_photo(
+                    chat_id=cid,
+                    photo=open(path, "rb"),
+                    caption=f"📸 Tenemos este modelo en color *{color.upper()}*: *{modelo}*",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"❌ Error enviando imagen: {e}")
+                await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
+
+        await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+        est["color"] = color
+        est["fase"] = "esperando_modelo_elegido"
+        estado_usuario[cid] = est
         return
 
     # ──────────────────────────────────────────────────────
@@ -3511,22 +3555,37 @@ async def reanudar_fase_actual(cid, ctx, est):
         await ctx.bot.send_message(chat_id=cid, text="📸 Por favor, envíame el comprobante de pago.")
 
     elif fase == "esperando_talla":
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="📏 ¿Cuál es tu talla? O si prefieres, mándame una foto de la lengüeta del zapato para ayudarte automáticamente."
-        )
+        if est.get("talla"):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"✅ Ya tengo registrada tu talla como *{est['talla']}*. ¿Deseas continuar con el pedido?",
+                parse_mode="Markdown"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="📏 ¿Cuál es tu talla? O si prefieres, mándame una foto de la lengüeta del zapato para ayudarte automáticamente."
+            )
 
     elif fase == "esperando_color":
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="🎨 ¿Qué color te gustaría para ese modelo? Puedes decirme por ejemplo 'negros', 'blancos', etc."
-        )
+        if est.get("color"):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"🎨 Ya tengo registrado que te interesan los *{est['color']}*. ¿Deseas ver más modelos de ese color?",
+                parse_mode="Markdown"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🎨 ¿Qué color te gustaría para ese modelo? Puedes decirme por ejemplo 'negros', 'blancos', etc."
+            )
 
     elif fase == "confirmar_datos_guardados":
         await ctx.bot.send_message(
             chat_id=cid,
             text="✅ ¿Estos datos están correctos o deseas cambiar algo? Escribe 'sí son correctos' o dime qué deseas modificar."
         )
+
 
 
 # Función para manejar la solicitud de precio por referencia
@@ -3939,11 +3998,10 @@ async def venom_webhook(req: Request):
                     if talla_detectada:
                         est["talla"] = talla_detectada
                         estado_usuario[cid] = est
-                        return JSONResponse({
-                            "type": "text",
-                            "text": f"📏 Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{talla_detectada}* en nuestra horma. ¿Deseas que te lo enviemos hoy mismo?",
-                            "parse_mode": "Markdown"
-                        })
+
+                        # 🔁 Simular respuesta automática para que siga el flujo sin esperar "sí"
+                        return await procesar_wa(cid, "sí")
+
                     else:
                         return JSONResponse({
                             "type": "text",
