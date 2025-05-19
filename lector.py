@@ -2557,6 +2557,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
     if est.get("fase") == "esperando_talla":
+        # 1. Si el usuario solo responde "sí" y ya hay una talla detectada por imagen, continuar
+        if txt in ["sí", "si", "claro", "dale", "ok", "de una"] and est.get("talla") in tallas:
+            talla_cliente = est["talla"]
+            return {
+                "type": "text",
+                "text": (
+                    f"✅ Perfecto. Tomamos la talla *{talla_cliente}* que detectamos por la imagen.\n"
+                    "Ahora vamos con tus datos para el envío 📝. ¿Cuál es tu nombre completo?"
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # 2. Buscar si el texto contiene una talla
         match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
         if match_talla:
             talla_cliente = match_talla.group(1) or match_talla.group(2)
@@ -2599,7 +2612,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "parse_mode": "Markdown"
                 }
 
-        # Continuar con el flujo normal sin botones
+        # 3. Si no dijo talla, mostrar opciones y pedir foto
         ruta = "/var/data/extra/lengueta_ejemplo.jpg"
         if os.path.exists(ruta):
             with open(ruta, "rb") as f:
@@ -2632,6 +2645,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 "parse_mode": "Markdown"
             }
+
 
 
 
