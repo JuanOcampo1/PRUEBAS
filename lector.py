@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta
 from collections import defaultdict
 from types import SimpleNamespace
-
+from oauth2client.service_account import ServiceAccountCredentials
 # ——— Librerías externas ———
 import numpy as np               # ←  déjalo si realmente lo usas
 import torch
@@ -66,54 +66,6 @@ api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
 
-
-def guardar_en_pedidos(memoria_cliente: dict, cid: str, estado: str, numero_venta: int = 0):
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-
-    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-
-    sheet = client.open("PEDIDOS").worksheet("PEDIDOS")
-
-    fila = [
-        numero_venta or "",
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        memoria_cliente.get("nombre", ""),
-        memoria_cliente.get("cedula", ""),
-        cid,
-        memoria_cliente.get("modelo", ""),
-        memoria_cliente.get("color", ""),
-        memoria_cliente.get("talla", ""),
-        memoria_cliente.get("correo", ""),
-        memoria_cliente.get("pago", ""),
-        memoria_cliente.get("fase", ""),
-        estado  # 👈 acá entra la etiqueta dinámica como "📍 Dirección confirmada"
-    ]
-    sheet.append_row(fila)
-
-def guardar_en_pendientes(dato: dict):
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-
-    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-
-    sheet = client.open("PEDIDOS").worksheet("PENDIENTES")
-
-    fila = [
-        dato.get("fecha", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        dato.get("nombre", ""),
-        dato.get("telefono", ""),
-        dato.get("modelo", ""),
-        dato.get("dia_hora", "")
-    ]
-    sheet.append_row(fila)
-
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
     """
@@ -129,6 +81,58 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
+def registrar_o_actualizar_lead(data: dict) -> bool:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
+    try:
+        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+
+        sheet = client.open("PEDIDOS").worksheet("LEADS")
+        telefono = data.get("Teléfono", "")
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Buscar si ya existe un registro con ese teléfono
+        registros = sheet.col_values(1)  # Columna A: Teléfono
+        if telefono in registros:
+            fila_index = registros.index(telefono) + 1  # porque gspread es 1-indexed
+            sheet.update(f"A{fila_index}:J{fila_index}", [[
+                telefono,
+                data.get("Fecha Registro", fecha),
+                data.get("Nombre", ""),
+                data.get("Producto", ""),
+                data.get("Color", ""),
+                data.get("Talla", ""),
+                data.get("Correo", ""),
+                data.get("Fase", ""),
+                data.get("Último Mensaje", ""),
+                data.get("Estado", "")
+            ]])
+            logging.info(f"[LEADS] 🔁 Lead actualizado (fila {fila_index})")
+        else:
+            # Si no existe, lo agrega como nuevo
+            sheet.append_row([
+                telefono,
+                data.get("Fecha Registro", fecha),
+                data.get("Nombre", ""),
+                data.get("Producto", ""),
+                data.get("Color", ""),
+                data.get("Talla", ""),
+                data.get("Correo", ""),
+                data.get("Fase", ""),
+                data.get("Último Mensaje", ""),
+                data.get("Estado", "")
+            ])
+            logging.info("[LEADS] ✅ Lead registrado por primera vez")
+
+        return True
+
+    except Exception as e:
+        logging.error(f"[LEADS] ❌ Error registrando o actualizando lead: {e}")
+        return False
 
 def descargar_imagen_lengueta():
     """
@@ -1391,28 +1395,59 @@ async def manejar_imagen(update, ctx):
 
 # ───────────────────────────────────────────────────────────────
 
-# 🔥 Registrar la orden en Google Sheets
-def registrar_orden(data: dict, fase: str = ""):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "cedula":       data.get("Cédula", ""),  # ✅ NUEVO
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", ""),
-        "fase_actual":  fase                     # ✅ NUEVO
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
+def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
+
     try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
+        # Cargar credenciales desde variable de entorno
+        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+
+        # Abrir el archivo de Sheets
+        sh = client.open("PEDIDOS")  # nombre del archivo
+        sheet = sh.worksheet(destino)  # nombre de la hoja
+
+        # Fecha y hora exacta del registro (ahora)
+        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Armar fila según hoja destino
+        if destino == "PEDIDOS":
+            fila = [
+                data.get("Número Venta", ""),
+                fecha_actual,
+                data.get("Cliente", ""),
+                data.get("Cédula", ""),
+                data.get("Teléfono", ""),
+                data.get("Producto", ""),
+                data.get("Color", ""),
+                data.get("Talla", ""),
+                data.get("Correo", ""),
+                data.get("Pago", ""),
+                data.get("fase_actual", ""),
+                data.get("Estado", "")
+            ]
+        elif destino == "PENDIENTES":
+            fila = [
+                fecha_actual,
+                data.get("Cliente", ""),
+                data.get("Teléfono", ""),
+                data.get("Producto", ""),
+                data.get("Pago", "")
+            ]
+        else:
+            logging.error(f"[SHEETS] ❌ Hoja no reconocida: {destino}")
+            return False
+
+        # Escribir la fila
+        sheet.append_row(fila)
+        logging.info(f"[SHEETS] ✅ Fila añadida correctamente en hoja '{destino}'")
+        return True
+
     except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
+        logging.error(f"[SHEETS] ❌ Error escribiendo en hoja '{destino}': {e}")
+        return False
+
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1664,9 +1699,21 @@ def extraer_dia_hora(txt):
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     numero = str(cid)
+    txt_raw = update.message.text or ""
+    txt = normalize(txt_raw)
 
     if cid not in estado_usuario:
-        reset_estado(cid)
+        est = {"fase": "inicio"}
+        estado_usuario[cid] = est
+
+        registrar_lead({
+            "Teléfono": cid,
+            "Fecha Registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Fase": "inicio",
+            "Estado": "🕐 Iniciado",
+            "Último Mensaje": txt_raw
+        })
+
         await update.message.reply_text(
             WELCOME_TEXT,
             reply_markup=menu_botones([
@@ -1676,14 +1723,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Ya existe el usuario
     est = estado_usuario[cid]
     inv = obtener_inventario()
     tallas = obtener_tallas_por_color_alias(inv, est.get("modelo", ""), est.get("color", ""))
     if isinstance(tallas, (int, float, str)):
         tallas = [str(tallas)]
-
-    txt_raw = update.message.text or ""
-    txt = normalize(txt_raw)
 
     print("🧠 FASE:", est.get("fase"))
     print("🧠 TEXTO:", txt_raw, "|", repr(txt_raw))
@@ -1699,6 +1744,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ])
         )
         return
+
 
     if menciona_catalogo(txt_raw):
         await ctx.bot.send_message(
@@ -1806,21 +1852,29 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 dia_hora = texto_limpio[match_dia.start():].strip()
 
             if nombre and modelo and dia_hora:
-                guardar_en_pendientes({
-                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "nombre": nombre.title(),
-                    "telefono": cid,
-                    "modelo": modelo,
-                    "dia_hora": dia_hora
-                })
+                datos_pendiente = {
+                    "Cliente": nombre.title(),
+                    "Teléfono": cid,
+                    "Producto": modelo,
+                    "Pago": dia_hora
+                }
 
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
-                )
-                est["fase"] = "inicial"
-                estado_usuario[cid] = est
+                ok = registrar_orden_unificada(datos_pendiente, destino="PENDIENTES")
+
+                if ok:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
+                    )
+                    est["fase"] = "inicial"
+                    estado_usuario[cid] = est
+                else:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="⚠️ No pudimos registrar tu promesa de pago. Intenta nuevamente."
+                    )
                 return
+
             else:
                 await ctx.bot.send_message(
                     chat_id=cid,
@@ -1840,6 +1894,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
             )
             return
+
 
     # ─────────────────────────────────────────────
     # 📍 DETECTAR SI ES DE BUCARAMANGA (GLOBAL)
@@ -2431,18 +2486,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "imagen_detectada":
         if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
 
-            # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar datos
+            # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar envío
             if est.get("talla"):
-                est["fase"] = "esperando_talla"
-                # Simula respuesta del cliente para que entre directo al bloque de talla
-                # Esto permite que el bloque de "esperando_talla" se ejecute automáticamente
-                return await procesar_wa(cid, "sí")
+                est["talla_detectada_auto"] = est["talla"]
+                est["fase"] = "esperando_confirmacion_envio"
+                estado_usuario[cid] = est
 
-            # 🔁 Si aún no tiene talla, se comporta como antes
+                await update.message.reply_text(
+                    f"✉️ Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{est['talla']}* en nuestra horma.\n"
+                    "¿Deseas que te lo enviemos hoy mismo?",
+                    parse_mode="Markdown"
+                )
+                return
+
+            # 🔁 Si aún no tiene talla, continuar con flujo normal
             est["fase"] = "esperando_talla"
-            tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-            if isinstance(tallas, (int, float, str)):
-                tallas = [str(tallas)]
+            estado_usuario[cid] = est
+
+    # ✅ Si ya se detectó la talla automáticamente y estamos esperando confirmación
+    if est.get("fase") == "esperando_confirmacion_envio" and txt in ("sí", "si", "claro", "continuemos", "dale"):
+        talla = est.get("talla_detectada_auto", "N/A")
+        est["fase"] = "esperando_pago"
+        estado_usuario[cid] = est
+        return {
+            "type": "text",
+            "text": (
+                f"Perfecto 👍 Vamos a alistarte la talla *{talla}*.\n\n"
+                "📦 ¿Deseas pagar con *transferencia* o *contraentrega*?"
+            ),
+            "parse_mode": "Markdown"
+        }
 
     # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
     match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
