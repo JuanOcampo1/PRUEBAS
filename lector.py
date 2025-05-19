@@ -1637,7 +1637,7 @@ def extraer_dia_hora(txt):
 colores_video_modelos = {
     "referencias": {
         "verde":    ["279", "305"],
-        "azul":     ["279", "304", "305"],  # 305 también como azul
+        "azul":     ["279", "304", "305"],
         "fucsia":   ["279"],
         "amarillo": ["279"],
         "naranja":  ["279", "304"],
@@ -1665,7 +1665,7 @@ color_aliases = {
     "negros": "negro",
     "rojos": "rojo",
     "naranjas": "naranja",
-    "aqua": "azul",        # 👈 alias agregado correctamente ahora
+    "aqua": "azul",
     "turquesa": "aqua"
 }
 
@@ -1673,17 +1673,12 @@ color_aliases = {
 def detectar_color_video(texto: str) -> str:
     texto = texto.lower()
     texto = texto.replace("las ", "").replace("los ", "").strip()
-
-    # Aplicar alias conocidos
     for palabra, real_color in color_aliases.items():
         if palabra in texto:
             return real_color
-
-    # Fallback directo
     for color in colores_video_modelos.get("referencias", {}):
         if color in texto:
             return color
-
     return ""
 
 # 🎨 Fallback general para otros flujos o videos
@@ -1698,6 +1693,7 @@ def detectar_color(texto: str) -> str:
         if c in texto:
             return c
     return ""
+
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4001,9 +3997,10 @@ async def venom_webhook(req: Request):
                     talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
                     if talla_detectada:
                         est["talla"] = talla_detectada
+                        est["fase"] = "imagen_detectada"      # ← avance de fase
                         estado_usuario[cid] = est
 
-                        # 🔁 Simular respuesta automática para que siga el flujo sin esperar "sí"
+                        # 🔁 Simular respuesta “sí” para continuar el flujo
                         return await procesar_wa(cid, "sí")
 
                     else:
