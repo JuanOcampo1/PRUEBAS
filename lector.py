@@ -1814,7 +1814,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
     # 🟨 Detección universal de color desde fase "inicio"
-    if est.get("fase") in ("inicio", "haciendo_pedido") and any(color in txt for color in colores_alias):
+    if est.get("fase") in ("inicio", "haciendo_pedido") and any(color in txt for color in color_aliases):
         color = detectar_color(txt)
         if not color:
             await ctx.bot.send_message(cid, "👀 ¿Qué color te interesa? No logré identificarlo.")
@@ -1855,6 +1855,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_modelo_elegido"
         estado_usuario[cid] = est
         return
+
 
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
@@ -2549,17 +2550,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ✅ Si ya se detectó la talla automáticamente y estamos esperando confirmación
     if est.get("fase") == "esperando_confirmacion_envio" and txt in ("sí", "si", "claro", "continuemos", "dale"):
-        talla = est.get("talla_detectada_auto", "N/A")
-        est["fase"] = "esperando_pago"
+        est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
-        return {
-            "type": "text",
-            "text": (
-                f"Perfecto 👍 Vamos a alistarte la talla *{talla}*.\n\n"
-                "📦 ¿Deseas pagar con *transferencia* o *contraentrega*?"
-            ),
-            "parse_mode": "Markdown"
-        }
+        return await procesar_wa(cid, "sí")
+
 
     # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
     match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
