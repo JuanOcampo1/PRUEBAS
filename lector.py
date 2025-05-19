@@ -1561,6 +1561,74 @@ async def enviar_video_referencia(cid, ctx, referencia):
         return None
 
 
+
+
+# 👟 Obtener tallas desde inventario, respetando alias del color
+def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
+    color_usuario = normalize(color_usuario)
+    
+    # 🔁 Crear set con todos los colores equivalentes: color original + sinónimos
+    colores_equivalentes = {color_usuario}
+    for alias, real in color_aliases.items():
+        if normalize(alias) == color_usuario or normalize(real) == color_usuario:
+            colores_equivalentes.add(normalize(alias))
+            colores_equivalentes.add(normalize(real))
+
+    tallas = set()
+    for item in inventario:
+        if normalize(item.get("modelo", "")) != normalize(modelo):
+            continue
+        if item.get("stock", "").lower() != "si":
+            continue
+
+        color_item = normalize(item.get("color", ""))
+        if any(color_equiv in color_item for color_equiv in colores_equivalentes):
+            tallas.add(str(item.get("talla", "")))
+
+    return sorted(tallas)
+
+def extraer_cm_y_convertir_talla(texto):
+    import re
+
+    tabla_cm = {
+        23: 34, 24: 35, 24.5: 36, 25: 37, 26: 38,
+        26.5: 39, 27: 40, 27.5: 41, 28.5: 42,
+        29: 43, 30: 44, 31: 45
+    }
+
+    # Buscar patrones como 26cm, 260mm, JP 27.5, etc.
+    coincidencias = re.findall(r'(\d{2,3}(?:\.\d+)?)\s?(cm|mm|jp)?', texto.lower())
+
+    for valor, unidad in coincidencias:
+        try:
+            numero = float(valor)
+            if unidad == "mm" or (not unidad and numero > 100):
+                numero = numero / 10  # convertir mm a cm
+            elif unidad == "jp":
+                numero = numero  # ya está en CM
+
+            # Redondear al más cercano de la tabla
+            numero = round(numero * 2) / 2  # redondea a 0.5
+
+            if numero in tabla_cm:
+                return tabla_cm[numero]
+        except:
+            continue
+
+    return None
+
+def extraer_nombre(txt):
+    palabras = txt.split()
+    nombre = " ".join(p for p in palabras if p.istitle())
+    return nombre or "Nombre no detectado"
+
+def extraer_modelo(txt):
+    m = re.search(r"\d{3,4}", txt)
+    return m.group() if m else "Modelo no detectado"
+
+def extraer_dia_hora(txt):
+    m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
+    return m.group() if m else "No especificado"
 # ────────────────────────────────────────────────────────────
 # FUNCIÓN AUXILIAR – Detectar color en texto con alias y video
 # ────────────────────────────────────────────────────────────
@@ -1630,74 +1698,6 @@ def detectar_color(texto: str) -> str:
         if c in texto:
             return c
     return ""
-
-# 👟 Obtener tallas desde inventario, respetando alias del color
-def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
-    color_usuario = normalize(color_usuario)
-    
-    # 🔁 Crear set con todos los colores equivalentes: color original + sinónimos
-    colores_equivalentes = {color_usuario}
-    for alias, real in color_aliases.items():
-        if normalize(alias) == color_usuario or normalize(real) == color_usuario:
-            colores_equivalentes.add(normalize(alias))
-            colores_equivalentes.add(normalize(real))
-
-    tallas = set()
-    for item in inventario:
-        if normalize(item.get("modelo", "")) != normalize(modelo):
-            continue
-        if item.get("stock", "").lower() != "si":
-            continue
-
-        color_item = normalize(item.get("color", ""))
-        if any(color_equiv in color_item for color_equiv in colores_equivalentes):
-            tallas.add(str(item.get("talla", "")))
-
-    return sorted(tallas)
-
-def extraer_cm_y_convertir_talla(texto):
-    import re
-
-    tabla_cm = {
-        23: 34, 24: 35, 24.5: 36, 25: 37, 26: 38,
-        26.5: 39, 27: 40, 27.5: 41, 28.5: 42,
-        29: 43, 30: 44, 31: 45
-    }
-
-    # Buscar patrones como 26cm, 260mm, JP 27.5, etc.
-    coincidencias = re.findall(r'(\d{2,3}(?:\.\d+)?)\s?(cm|mm|jp)?', texto.lower())
-
-    for valor, unidad in coincidencias:
-        try:
-            numero = float(valor)
-            if unidad == "mm" or (not unidad and numero > 100):
-                numero = numero / 10  # convertir mm a cm
-            elif unidad == "jp":
-                numero = numero  # ya está en CM
-
-            # Redondear al más cercano de la tabla
-            numero = round(numero * 2) / 2  # redondea a 0.5
-
-            if numero in tabla_cm:
-                return tabla_cm[numero]
-        except:
-            continue
-
-    return None
-
-def extraer_nombre(txt):
-    palabras = txt.split()
-    nombre = " ".join(p for p in palabras if p.istitle())
-    return nombre or "Nombre no detectado"
-
-def extraer_modelo(txt):
-    m = re.search(r"\d{3,4}", txt)
-    return m.group() if m else "Modelo no detectado"
-
-def extraer_dia_hora(txt):
-    m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
-    return m.group() if m else "No especificado"
-
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
