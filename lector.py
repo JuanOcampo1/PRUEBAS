@@ -3081,7 +3081,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         resumen = est["resumen"]
         precio_original = est["precio_total"]
 
-        # ─── TRANSFERENCIA ────────────────────────────
         if metodo_detectado == "transferencia":
             est["fase"] = "esperando_comprobante"
             est["metodo_pago"] = "Transferencia"
@@ -3107,7 +3106,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
 
-        # ─── CONTRAENTREGA ────────────────────────────
         elif metodo_detectado == "contraentrega":
             est["fase"] = "esperando_comprobante"
             est["metodo_pago"] = "Contraentrega"
@@ -3127,50 +3125,39 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
 
+        elif metodo_detectado == "addi":
+            est["fase"] = "esperando_datos_addi"
+            est["metodo_pago"] = "Addi"
+            estado_usuario[cid] = est
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🟦 Elegiste *Addi* para financiar tu compra.\n\n"
+                    "Por favor envíame los siguientes datos (cada uno en una línea):\n"
+                    "1️⃣ Nombre completo\n"
+                    "2️⃣ Número de cédula\n"
+                    "3️⃣ Correo electrónico\n"
+                    "4️⃣ Teléfono WhatsApp\n\n"
+                    "_La aprobación está sujeta a políticas de Addi y centrales de riesgo._"
+                ),
+                parse_mode="Markdown"
+            )
+            return
+
     # ────────────────────────────────────────────────
     # ⏸️ PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
     # ────────────────────────────────────────────────
-    #   Coloca esto al inicio de tu manejador, justo después de obtener `est`
-    #   para que ningún mensaje siga fluyendo mientras dure la pausa.
-    #
     if est.get("pausa_hasta"):
         pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
         if datetime.now() < pausa_hasta:
             logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
-            return {"status": "paused"}            # Venom/cliente no hará nada
+            return {"status": "paused"}
         else:
-            # Expiró la pausa; restablece el flujo normal
             est.pop("pausa_hasta", None)
             if est.get("fase", "").startswith("pausado_"):
                 est["fase"] = "inicial"
             estado_usuario[cid] = est
-    # ────────────────────────────────────────────────
-
-
-    # ────────────────────────────────────────────────
-    # 💳 MÉTODO DE PAGO – OPCIÓN ADDI (CRÉDITO)
-    # ────────────────────────────────────────────────
-    elif metodo_detectado == "addi":
-        est["fase"] = "esperando_datos_addi"
-        est["metodo_pago"] = "Addi"
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🟦 Elegiste *Addi* para financiar tu compra.\n\n"
-                "Por favor envíame los siguientes datos (cada uno en una línea):\n"
-                "1️⃣ Nombre completo\n"
-                "2️⃣ Número de cédula\n"
-                "3️⃣ Correo electrónico\n"
-                "4️⃣ Teléfono WhatsApp\n\n"
-                "_La aprobación está sujeta a políticas de Addi y centrales de riesgo._"
-            ),
-            parse_mode="Markdown"
-        )
-
-        estado_usuario[cid] = est
-        return
-
 
     # ────────────────────────────────────────────────
     # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
@@ -3198,10 +3185,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             datos_addi = {
                 "Cliente":   nombre.title(),
                 "Cédula":    cedula.group(0),
-                "Correo":    correo.group(0),
                 "Teléfono":  telefono.group(0),
-                "Producto": f"{est.get('modelo','')} {est.get('color','')}".strip(),
-                "Talla":     est.get("talla", ""),
+                "Correo":    correo.group(0),
                 "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
@@ -3213,7 +3198,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
                     )
                 )
-                # 🔒 Pausa el bot por 24 h para que solo intervenga un humano
                 est["fase"] = "pausado_addi"
                 est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
                 estado_usuario[cid] = est
@@ -3231,9 +3215,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
             )
             return
-
-
-
 
 
     # 📸 Recibir comprobante de pago
