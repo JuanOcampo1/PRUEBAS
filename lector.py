@@ -3954,12 +3954,12 @@ async def venom_webhook(req: Request):
                     talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
                     if talla_detectada:
                         est["talla"] = talla_detectada
-                        est["fase"] = "imagen_detectada"      # ← avance de fase
                         estado_usuario[cid] = est
-
-                        # 🔁 Simular respuesta “sí” para continuar el flujo
-                        return await procesar_wa(cid, "sí")
-
+                        return JSONResponse({
+                            "type": "text",
+                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
+                            "parse_mode": "Markdown"
+                        })
                     else:
                         return JSONResponse({
                             "type": "text",
