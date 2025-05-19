@@ -2795,12 +2795,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"💲Valor a pagar: {precio:,} COP\n\n"
                 "¿Cómo deseas hacer el pago?\n"
                 "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
-                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
-                "Escribe *Transferencia* o *Contraentrega*."
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
+                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
+                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
             estado_usuario[cid] = est
             return
+
 
         # B) Detectar qué campo desea cambiar
         campos = {
@@ -3152,12 +3154,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
         if datetime.now() < pausa_hasta:
             logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
-            return {"status": "paused"}
+
+            # Permitir solo imágenes si está en espera de comprobante
+            if est.get("fase") == "pausado_addi" and mtype.startswith("image"):
+                logging.info(f"[PAUSA] Imagen recibida durante pausa (permitido)")
+                # aquí puedes permitir analizar imagen si lo deseas
+                pass  # o continuar
+            else:
+                return {"status": "paused"}  # Silencio total para texto u otros
         else:
+            # Expiró la pausa; restablecer flujo
             est.pop("pausa_hasta", None)
             if est.get("fase", "").startswith("pausado_"):
                 est["fase"] = "inicial"
             estado_usuario[cid] = est
+
 
     # ────────────────────────────────────────────────
     # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
@@ -3255,6 +3266,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             json.dumps(est["resumen"], indent=2),
             tmp
         )
+
+        # ✅ Registrar también en la hoja PEDIDOS como venta finalizada
+        resumen_final = est["resumen"]
+        resumen_final["fase_actual"] = "Finalizado"
+        resumen_final["Estado"] = "COMPLETADO"
+        registrar_orden_unificada(resumen_final, destino="PEDIDOS")
+
         os.remove(tmp)
 
         await ctx.bot.send_message(
@@ -3267,6 +3285,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reset_estado(cid)
         estado_usuario.pop(cid, None)
         return
+
 
 
 
