@@ -2531,125 +2531,63 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "imagen_detectada":
         if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
 
-            # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar envío
+            # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar datos
             if est.get("talla"):
-                est["talla_detectada_auto"] = est["talla"]
-                est["fase"] = "esperando_confirmacion_envio"
+                est["fase"] = "esperando_talla"
                 estado_usuario[cid] = est
 
-                await update.message.reply_text(
-                    f"✉️ Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{est['talla']}* en nuestra horma.\n"
-                    "¿Deseas que te lo enviemos hoy mismo?",
-                    parse_mode="Markdown"
-                )
-                return
+                # ⚠️ Reentrada automática para que se dispare el flujo como si el cliente hubiera escrito "sí"
+                return await procesar_wa(cid, "sí")
 
-            # 🔁 Si aún no tiene talla, continuar con flujo normal
+            # 🔁 Si aún no tiene talla, mostrar las tallas y pedir foto de lengüeta
             est["fase"] = "esperando_talla"
             estado_usuario[cid] = est
 
-    # ✅ Si ya se detectó la talla automáticamente y estamos esperando confirmación
-    if est.get("fase") == "esperando_confirmacion_envio" and txt in ("sí", "si", "claro", "continuemos", "dale"):
-        est["fase"] = "esperando_talla"
-        estado_usuario[cid] = est
-        return await procesar_wa(cid, "confirmar talla detectada")
+            tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
+            if isinstance(tallas, (int, float, str)):
+                tallas = [str(tallas)]
 
-
-    # 🔍 Ver si el cliente ya dijo una talla tipo "talla 41" o "41"
-    if est.get("fase") == "esperando_talla":
-        # 1. Si el usuario solo responde "sí" y ya hay una talla detectada por imagen, continuar
-        if txt in ["sí", "si", "claro", "dale", "ok", "de una"] and est.get("talla") in tallas:
-            talla_cliente = est["talla"]
-            return {
-                "type": "text",
-                "text": (
-                    f"✅ Perfecto. Tomamos la talla *{talla_cliente}* que detectamos por la imagen.\n"
-                    "Ahora vamos con tus datos para el envío 📝. ¿Cuál es tu nombre completo?"
-                ),
-                "parse_mode": "Markdown"
-            }
-
-        # 2. Buscar si el texto contiene una talla
-        match_talla = re.search(r"\btalla\s*(\d{2})\b|\b(\d{2})\b", txt)
-        if match_talla:
-            talla_cliente = match_talla.group(1) or match_talla.group(2)
-            if talla_cliente in tallas:
-                ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-                if os.path.exists(ruta):
-                    with open(ruta, "rb") as f:
-                        b64 = base64.b64encode(f.read()).decode("utf-8")
-                        return {
-                            "type": "multi",
-                            "messages": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
-                                        "📸 Pero para estar más seguros, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
-                                    ),
-                                    "parse_mode": "Markdown"
-                                },
-                                {
-                                    "type": "photo",
-                                    "base64": f"data:image/jpeg;base64,{b64}",
-                                    "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                                }
-                            ]
-                        }
-                else:
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
                     return {
-                        "type": "text",
-                        "text": (
-                            f"✅ Sí, tenemos disponible la talla *{talla_cliente}*.\n\n"
-                            "📸 Pero no encontré la imagen de ejemplo, por favor envíame una foto de la lengüeta."
-                        ),
-                        "parse_mode": "Markdown"
+                        "type": "multi",
+                        "messages": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                                ),
+                                "parse_mode": "Markdown"
+                            },
+                            {
+                                "type": "photo",
+                                "base64": f"data:image/jpeg;base64,{b64}",
+                                "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                            }
+                        ]
                     }
             else:
                 return {
                     "type": "text",
-                    "text": f"❌ Lo siento, no tenemos disponible la talla *{talla_cliente}* para ese modelo.",
+                    "text": (
+                        f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                        "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
+                    ),
                     "parse_mode": "Markdown"
                 }
 
-        # 3. Si no dijo talla, mostrar opciones y pedir foto
-        ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-        if os.path.exists(ruta):
-            with open(ruta, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
-                return {
-                    "type": "multi",
-                    "messages": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                                "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
-                            ),
-                            "parse_mode": "Markdown"
-                        },
-                        {
-                            "type": "photo",
-                            "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                        }
-                    ]
-                }
         else:
-            return {
-                "type": "text",
-                "text": (
-                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                    "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
-                ),
-                "parse_mode": "Markdown"
-            }
-
-
-
-
-
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia. 📋",
+                parse_mode="Markdown"
+            )
+            reset_estado(cid)
+            return
 
 
     # 🛒 Flujo manual si está buscando modelo
