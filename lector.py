@@ -2536,6 +2536,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 est["fase"] = "esperando_talla"
                 estado_usuario[cid] = est
 
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        f"📏 Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{est['talla']}* en nuestra horma.\n"
+                        "¿Deseas que te lo enviemos hoy mismo?"
+                    ),
+                    parse_mode="Markdown"
+                )
+
                 # ⚠️ Reentrada automática para que se dispare el flujo como si el cliente hubiera escrito "sí"
                 return await procesar_wa(cid, "sí")
 
@@ -2588,6 +2597,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
+
 
 
     # 🛒 Flujo manual si está buscando modelo
