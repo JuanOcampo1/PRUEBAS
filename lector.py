@@ -874,7 +874,7 @@ import logging
 
 async def enviar_welcome_venom(cid: str):
     try:
-        audio_path = "/var/data/audios/bienvenida/bienvenida1.ogg"
+        audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
 
         logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {os.path.exists(audio_path)}")
 
@@ -892,8 +892,8 @@ async def enviar_welcome_venom(cid: str):
                 {
                     "type": "audio",
                     "base64": b64,
-                    "mimetype": "audio/ogg",
-                    "filename": "bienvenida1.ogg",
+                    "mimetype": "audio/mpeg",  # 👈 importante
+                    "filename": "bienvenida.mp3",
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
                 {
@@ -918,6 +918,7 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ Hubo un error enviando el mensaje de bienvenida."
         }
+
 
 
 
