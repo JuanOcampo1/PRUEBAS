@@ -4095,7 +4095,21 @@ async def venom_webhook(req: Request):
                     if es_comprobante_valido(texto):
                         logging.info("✅ Comprobante válido por OCR")
                         resumen = est.get("resumen", {})
-                        registrar_orden(resumen)
+
+                        # Asegurar que tenga todas las claves necesarias
+                        resumen.setdefault("Número Venta", est.get("numero", ""))
+                        resumen.setdefault("Cliente", est.get("nombre", ""))
+                        resumen.setdefault("Cédula", est.get("cedula", ""))
+                        resumen.setdefault("Teléfono", est.get("telefono", ""))
+                        resumen.setdefault("Producto", est.get("modelo", ""))
+                        resumen.setdefault("Color", est.get("color", ""))
+                        resumen.setdefault("Talla", est.get("talla", ""))
+                        resumen.setdefault("Correo", est.get("correo", ""))
+                        resumen.setdefault("Pago", est.get("pago", ""))
+                        resumen["fase_actual"] = "Finalizado"
+                        resumen["Estado"] = "COMPLETADO"
+
+                        registrar_orden_unificada(resumen, destino="PEDIDOS")
 
                         enviar_correo(
                             est["correo"],
@@ -4127,6 +4141,7 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
+
 
 
 
