@@ -868,11 +868,23 @@ SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
+import os
+import base64
+import logging
+
 async def enviar_welcome_venom(cid: str):
     try:
         audio_path = "/var/data/audios/bienvenida/bienvenida1.ogg"
+
+        logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {os.path.exists(audio_path)}")
+
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"No se encontró el archivo: {audio_path}")
+
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
 
         return {
             "type": "multi",
@@ -906,6 +918,7 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ Hubo un error enviando el mensaje de bienvenida."
         }
+
 
 
 
@@ -1488,10 +1501,19 @@ async def enviar_sticker(ctx, cid, nombre_archivo):
 async def enviar_todos_los_videos(cid):
     try:
         carpeta = "/var/data/videos"
-        archivos = [
+        if not os.path.exists(carpeta):
+            logging.warning(f"[VIDEOS] ⚠️ Carpeta no encontrada: {carpeta}")
+            return {
+                "type": "text",
+                "text": "⚠️ No tengo videos cargados por ahora. Intenta más tarde."
+            }
+
+        archivos = sorted([
             f for f in os.listdir(carpeta)
             if f.lower().endswith(".mp4")
-        ]
+        ])
+
+        logging.info(f"[VIDEOS] Archivos detectados: {archivos}")
 
         if not archivos:
             return {
@@ -1502,29 +1524,40 @@ async def enviar_todos_los_videos(cid):
         mensajes = []
         for nombre in archivos:
             ruta = os.path.join(carpeta, nombre)
-            with open(ruta, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
+            try:
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
 
-            mensajes.append({
-                "type": "video",
-                "base64": b64,
-                "mimetype": "video/mp4",
-                "filename": nombre,
-                "text": f"🎥 Video: {nombre}"
-            })
+                mensajes.append({
+                    "type": "video",
+                    "base64": b64,
+                    "mimetype": "video/mp4",
+                    "filename": nombre,
+                    "text": f"🎥 Video: {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                })
 
-        logging.info(f"[VIDEOS] ✅ Se enviaron {len(mensajes)} videos.")
+            except Exception as ve:
+                logging.error(f"❌ Error leyendo video '{nombre}': {ve}")
+
+        if not mensajes:
+            return {
+                "type": "text",
+                "text": "❌ No logré preparar ningún video. Intenta más tarde."
+            }
+
+        logging.info(f"[VIDEOS] ✅ Videos preparados: {len(mensajes)}")
         return {
             "type": "multi",
             "messages": mensajes
         }
 
     except Exception as e:
-        logging.error(f"❌ Error al enviar videos: {e}")
+        logging.error(f"❌ Error general al preparar videos: {e}")
         return {
             "type": "text",
             "text": "❌ No logré enviarte los videos. Intenta más tarde."
         }
+
 
 
 
@@ -1596,10 +1629,6 @@ def extraer_modelo(txt):
 def extraer_dia_hora(txt):
     m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
     return m.group() if m else "No especificado"
-# ────────────────────────────────────────────────────────────
-# FUNCIÓN AUXILIAR – Detectar color en texto con alias y video
-# ────────────────────────────────────────────────────────────
-
 # 📼 Asociación de colores y modelos por video específico
 colores_video_modelos = {
     "referencias": {
@@ -1615,31 +1644,22 @@ colores_video_modelos = {
     }
 }
 
-# 🎨 Sinónimos y variantes comunes de clientes
+# 🎨 Alias de color (bidireccional)
 color_aliases = {
-    "rosado": "fucsia",
-    "rosa": "fucsia",
-    "fucsias": "fucsia",
-    "celeste": "azul",
-    "azul cielo": "aqua",
-    "azul clarito": "aqua",
-    "azul claro": "aqua",
-    "azulito": "aqua",
-    "azules": "azul",
-    "verdes": "verde",
-    "amarillas": "amarillo",
-    "blancos": "blanco",
-    "negros": "negro",
-    "rojos": "rojo",
-    "naranjas": "naranja",
-    "aqua": "azul",
-    "turquesa": "aqua"
+    "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
+    "celeste": "azul", "azules": "azul",
+    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
+    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
+    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
 }
+
+# 🚀 Generar alias inversos automáticamente
+for base_color in list(color_aliases.values()):
+    color_aliases[base_color] = base_color
 
 # 🧠 Detección especial para colores por video
 def detectar_color_video(texto: str) -> str:
-    texto = texto.lower()
-    texto = texto.replace("las ", "").replace("los ", "").strip()
+    texto = texto.lower().strip()
     for palabra, real_color in color_aliases.items():
         if palabra in texto:
             return real_color
@@ -1648,18 +1668,22 @@ def detectar_color_video(texto: str) -> str:
             return color
     return ""
 
-# 🎨 Fallback general para otros flujos o videos
+# 🎨 Detección general de colores
 def detectar_color(texto: str) -> str:
-    colores = [
+    texto = texto.lower().strip()
+    for palabra, real_color in color_aliases.items():
+        if palabra in texto:
+            return real_color
+    colores_base = [
         "negro", "blanco", "rojo", "azul", "amarillo", "verde",
         "rosado", "gris", "morado", "naranja", "café", "beige",
-        "neón", "limón", "fucsia", "celeste", "aqua"
+        "neón", "limón", "fucsia", "celeste", "aqua", "turquesa"
     ]
-    texto = texto.lower()
-    for c in colores:
+    for c in colores_base:
         if c in texto:
             return c
     return ""
+
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1681,6 +1705,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 👋 Detectar saludo inicial y responder con bienvenida + videos
     if any(p in txt for p in ("hola", "buenas", "buenos días", "buenas tardes", "buenas noches")):
+        logging.info(f"👋 Saludo detectado: {txt_raw} — CID: {cid}")
+
         # 1. Mensaje de bienvenida
         await update.message.reply_text(
             WELCOME_TEXT,
@@ -1693,65 +1719,54 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 2. Envío automático de todos los videos disponibles
         ruta_videos = "/var/data/videos"
         try:
+            if not os.path.exists(ruta_videos):
+                logging.warning(f"⚠️ Carpeta de videos no encontrada: {ruta_videos}")
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
+                return
+
             archivos = sorted([
                 f for f in os.listdir(ruta_videos)
                 if f.lower().endswith(".mp4")
             ])
-            if archivos:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
-                )
-                for nombre in archivos:
+            logging.info(f"🎬 Videos encontrados: {archivos}")
+
+            if not archivos:
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
+                return
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+            )
+
+            for nombre in archivos:
+                try:
                     path = os.path.join(ruta_videos, nombre)
+                    logging.info(f"🎥 Enviando video: {path}")
                     await ctx.bot.send_video(
                         chat_id=cid,
                         video=open(path, "rb"),
                         caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
                         parse_mode="Markdown"
                     )
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="🧐 ¿Cuál de estos modelos te interesa?"
-                )
-                est = {"fase": "esperando_modelo_elegido"}
-                estado_usuario[cid] = est
-                return
+                except Exception as e:
+                    logging.error(f"❌ Error enviando video '{nombre}': {e}")
+                    await ctx.bot.send_message(cid, f"⚠️ No pude enviar el video {nombre}")
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🧐 ¿Cuál de estos modelos te interesa?"
+            )
+
+            est = {"fase": "esperando_modelo_elegido"}
+            estado_usuario[cid] = est
+            return
+
         except Exception as e:
             logging.error(f"❌ Error al enviar videos tras saludo: {e}")
- 
-    if cid not in estado_usuario:
-        est = {"fase": "inicio"}
-        estado_usuario[cid] = est
+            await ctx.bot.send_message(cid, "❌ Hubo un error al cargar los videos.")
+            return
 
-        registrar_lead({
-            "Teléfono": cid,
-            "Fecha Registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Fase": "inicio",
-            "Estado": "🕐 Iniciado",
-            "Último Mensaje": txt_raw
-        })
-
-        await update.message.reply_text(
-            WELCOME_TEXT,
-            reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                "Rastrear pedido", "Realizar cambio"
-            ])
-        )
-        return
-
- 
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
-        reset_estado(cid)
-        await update.message.reply_text(
-            WELCOME_TEXT,
-            reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                "Rastrear pedido", "Realizar cambio"
-            ])
-        )
-        return
 
     # 🎨 Si el cliente dice "me gustaron los amarillos", "quiero los rojos", etc.
     if detectar_color(txt):
