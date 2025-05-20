@@ -892,8 +892,8 @@ async def enviar_welcome_venom(cid: str):
                 {
                     "type": "audio",
                     "base64": b64,
-                    "mimetype": "audio/mpeg",  # 👈 importante
-                    "filename": "bienvenida.mp3",
+                    "mimetype": "audio/mpeg",  # 👈 correcto
+                    "filename": "bienvenida1.mp3",  # 👈 ahora sí es exacto
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
                 {
@@ -918,9 +918,6 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ Hubo un error enviando el mensaje de bienvenida."
         }
-
-
-
 
 
 CLIP_INSTRUCTIONS = (
@@ -1717,7 +1714,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-        # 2. Envío automático de todos los videos disponibles
+        # 2. Envío automático de todos los videos disponibles (excepto confianza)
         ruta_videos = "/var/data/videos"
         try:
             if not os.path.exists(ruta_videos):
@@ -1727,11 +1724,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             archivos = sorted([
                 f for f in os.listdir(ruta_videos)
-                if f.lower().endswith(".mp4")
+                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
             ])
-            logging.info(f"🎬 Videos encontrados: {archivos}")
+            logging.info(f"🎬 Videos encontrados (sin confianza): {archivos}")
 
             if not archivos:
+                logging.warning("⚠️ Lista de videos vacía aunque la carpeta existe.")
                 await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
                 return
 
@@ -1739,17 +1737,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 chat_id=cid,
                 text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
             )
+            logging.info("🎯 Procediendo a enviar videos...")
 
             for nombre in archivos:
                 try:
                     path = os.path.join(ruta_videos, nombre)
-                    logging.info(f"🎥 Enviando video: {path}")
-                    await ctx.bot.send_video(
-                        chat_id=cid,
-                        video=open(path, "rb"),
-                        caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
-                        parse_mode="Markdown"
-                    )
+                    size = os.path.getsize(path)
+                    logging.info(f"🎥 Enviando: {nombre} — {size / 1024:.2f} KB")
+
+                    with open(path, "rb") as video_file:
+                        await ctx.bot.send_video(
+                            chat_id=cid,
+                            video=video_file,
+                            caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
+                            parse_mode="Markdown"
+                        )
                 except Exception as e:
                     logging.error(f"❌ Error enviando video '{nombre}': {e}")
                     await ctx.bot.send_message(cid, f"⚠️ No pude enviar el video {nombre}")
@@ -1759,7 +1761,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="🧐 ¿Cuál de estos modelos te interesa?"
             )
 
-            est = {"fase": "esperando_modelo_elegido"}
+            # Solo cambiar la fase sin borrar el estado anterior
+            est["fase"] = "esperando_modelo_elegido"
             estado_usuario[cid] = est
             return
 
