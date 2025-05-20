@@ -2688,76 +2688,69 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if talla_detectada:
             est["talla"] = talla_detectada
 
-            # 🔍 Ver si ya hay memoria del cliente
-            cliente = obtener_datos_cliente(numero)
+        # 🔍 Ver si ya hay memoria del cliente
+        cliente = obtener_datos_cliente(numero)
 
-            if cliente:
-                nombre    = cliente.get("nombre", "cliente")
-                correo    = cliente.get("correo", "No registrado")
-                telefono  = cliente.get("telefono", numero)
-                cedula    = cliente.get("cedula", "No registrada")
-                ciudad    = cliente.get("ciudad", "No registrada")
-                provincia = cliente.get("provincia", "No registrada")
-                direccion = cliente.get("direccion", "No registrada")
+        if cliente:
+            nombre    = cliente.get("nombre", "cliente")
+            correo    = cliente.get("correo", "No registrado")
+            telefono  = cliente.get("telefono", numero)
+            cedula    = cliente.get("cedula", "No registrada")
+            ciudad    = cliente.get("ciudad", "No registrada")
+            provincia = cliente.get("provincia", "No registrada")
+            direccion = cliente.get("direccion", "No registrada")
 
-                est.update({
-                    "nombre": nombre,
-                    "correo": correo,
-                    "telefono": telefono,
-                    "cedula": cedula,
-                    "ciudad": ciudad,
-                    "provincia": provincia,
-                    "direccion": direccion
-                })
+            est.update({
+                "nombre": nombre,
+                "correo": correo,
+                "telefono": telefono,
+                "cedula": cedula,
+                "ciudad": ciudad,
+                "provincia": provincia,
+                "direccion": direccion
+            })
 
-                precio = next(
-                    (i["precio"] for i in inv
-                     if normalize(i["marca"]) == normalize(est["marca"])
-                     and normalize(i["modelo"]) == normalize(est["modelo"])
-                     and normalize(i["color"]) == normalize(est["color"])),
-                    None
-                )
-                est["precio_total"] = int(precio) if precio else 0
-                est["sale_id"] = generate_sale_id()
-
-                resumen = (
-                    f"✅ Pedido: {est['sale_id']}\n"
-                    f"👤Nombre: {nombre}\n"
-                    f"📧Correo: {correo}\n"
-                    f"📱Celular: {telefono}\n"
-                    f"🪪Cédula: {cedula}\n"
-                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
-                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
-                )
-
-                est["fase"] = "confirmar_datos_guardados"
-                estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
-                return
-
-            # 🧾 No hay cliente guardado → continuar normal
-            est["fase"] = "esperando_nombre"
-            estado_usuario[cid] = est
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🤩Perfecto, para iniciar la orden de compra dime tu nombre completo",
-                parse_mode="Markdown"
+            precio = next(
+                (i["precio"] for i in inv
+                 if normalize(i["marca"]) == normalize(est["marca"])
+                 and normalize(i["modelo"]) == normalize(est["modelo"])
+                 and normalize(i["color"]) == normalize(est["color"])),
+                None
             )
+            est["precio_total"] = int(precio) if precio else 0
+            est["sale_id"] = generate_sale_id()
+
+            resumen = (
+                f"✅ Pedido: {est['sale_id']}\n"
+                f"👤Nombre: {nombre}\n"
+                f"📧Correo: {correo}\n"
+                f"📱Celular: {telefono}\n"
+                f"🪪Cédula: {cedula}\n"
+                f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                "¿Cómo deseas hacer el pago?\n"
+                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
+                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
+                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
+            )
+
+            est["fase"] = "esperando_pago"
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
             return
 
-        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
+        # 🧾 No hay cliente guardado → continuar normal
+        est["fase"] = "esperando_nombre"
+        estado_usuario[cid] = est
         await ctx.bot.send_message(
             chat_id=cid,
-            text=(
-                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
-            ),
+            text="🤩Perfecto, para iniciar la orden de compra dime tu nombre completo",
             parse_mode="Markdown"
         )
         return
+
 
 
 
@@ -3175,13 +3168,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ────────────────────────────────────────────────
     if est.get("fase") == "esperando_datos_addi":
         try:
-            partes   = [p.strip() for p in txt_raw.splitlines() if p.strip()]
-            nombre   = partes[0] if len(partes) >= 1 else ""
-            cedula   = re.search(r"\b\d{6,12}\b", partes[1] if len(partes) >= 2 else "")
-            correo   = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", partes[2] if len(partes) >= 3 else "")
-            telefono = re.search(r"\b3\d{9}\b", partes[3] if len(partes) >= 4 else "")
+            partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
+            nombre = partes[0] if len(partes) >= 1 else ""
 
-            if not (nombre and cedula and correo and telefono):
+            cedula_match = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
+            correo_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
+            telefono_match = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
+
+            if not (nombre and cedula_match and correo_match and telefono_match):
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
@@ -3194,11 +3188,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
 
             datos_addi = {
-                "Cliente":   nombre.title(),
-                "Cédula":    cedula.group(0),
-                "Teléfono":  telefono.group(0),
-                "Correo":    correo.group(0),
-                "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "Cliente": nombre.title(),
+                "Cédula": cedula_match.group(0),
+                "Teléfono": telefono_match.group(0),
+                "Correo": correo_match.group(0),
+                "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
             if registrar_orden_unificada(datos_addi, destino="ADDI"):
@@ -3228,63 +3222,77 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
 
+
     # 📸 Recibir comprobante de pago
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}_proof.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
+        try:
+            f = await update.message.photo[-1].get_file()
+            tmp = os.path.join("temp", f"{cid}_proof.jpg")
+            os.makedirs("temp", exist_ok=True)
+            await f.download_to_drive(tmp)
 
-        with io.open(tmp, "rb") as image_file:
-            content = image_file.read()
-        image = vision.Image(content=content)
-        response = vision_client.text_detection(image=image)
-        textos_detectados = response.text_annotations
+            with io.open(tmp, "rb") as image_file:
+                content = image_file.read()
+            image = vision.Image(content=content)
+            response = vision_client.text_detection(image=image)
+            textos_detectados = response.text_annotations
 
-        texto_extraido = textos_detectados[0].description if textos_detectados else ""
-        print("🧾 TEXTO EXTRAÍDO:\n", texto_extraido)
+            texto_extraido = textos_detectados[0].description if textos_detectados else ""
+            print("🧾 TEXTO EXTRAÍDO:\n", texto_extraido)
 
-        if not es_comprobante_valido(texto_extraido):
+            if not es_comprobante_valido(texto_extraido):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="⚠️ El comprobante no parece válido. Asegúrate de que sea legible y que diga *Pago exitoso*.",
+                    parse_mode="Markdown"
+                )
+                os.remove(tmp)
+                return
+
+            # Enviar correos (si aplica)
+            try:
+                enviar_correo(
+                    est["correo"],
+                    f"Pago recibido {est['resumen']['Número Venta']}",
+                    json.dumps(est["resumen"], indent=2)
+                )
+                enviar_correo_con_adjunto(
+                    EMAIL_JEFE,
+                    f"Comprobante {est['resumen']['Número Venta']}",
+                    json.dumps(est["resumen"], indent=2),
+                    tmp
+                )
+            except Exception as e:
+                logging.warning(f"📧 Error al enviar correos: {e}")
+
+            # ✅ Registrar en hoja PEDIDOS como completado
+            resumen_final = est.get("resumen", {})
+            resumen_final["fase_actual"] = "Finalizado"
+            resumen_final["Estado"] = "COMPLETADO"
+            registrar_orden_unificada(resumen_final, destino="PEDIDOS")
+
+            os.remove(tmp)
+
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ El comprobante no parece válido. Asegúrate de que sea legible y que diga *Pago exitoso*.",
-                parse_mode="Markdown"
+                text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
             )
-            os.remove(tmp)
+
+            await enviar_sticker(ctx, cid, "sticker_fin_de_compra_gracias.webp")
+
+            reset_estado(cid)
+            estado_usuario.pop(cid, None)
             return
 
-        registrar_orden(est["resumen"])
+        except Exception as e:
+            logging.error(f"❌ Error al procesar comprobante: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ No pude procesar el comprobante. Intenta con otra imagen.",
+                parse_mode="Markdown"
+            )
+            return
 
-        enviar_correo(
-            est["correo"],
-            f"Pago recibido {est['resumen']['Número Venta']}",
-            json.dumps(est["resumen"], indent=2)
-        )
-        enviar_correo_con_adjunto(
-            EMAIL_JEFE,
-            f"Comprobante {est['resumen']['Número Venta']}",
-            json.dumps(est["resumen"], indent=2),
-            tmp
-        )
-
-        # ✅ Registrar también en la hoja PEDIDOS como venta finalizada
-        resumen_final = est["resumen"]
-        resumen_final["fase_actual"] = "Finalizado"
-        resumen_final["Estado"] = "COMPLETADO"
-        registrar_orden_unificada(resumen_final, destino="PEDIDOS")
-
-        os.remove(tmp)
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
-        )
-
-        await enviar_sticker(ctx, cid, "sticker_fin_de_compra_gracias.webp")
-
-        reset_estado(cid)
-        estado_usuario.pop(cid, None)
-        return
 
 
 
