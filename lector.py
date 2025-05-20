@@ -1726,7 +1726,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f for f in os.listdir(ruta_videos)
                 if f.lower().endswith(".mp4") and "confianza" not in f.lower()
             ])
+
             logging.info(f"🎬 Videos encontrados (sin confianza): {archivos}")
+            print("📂 DEBUG: Archivos encontrados para enviar:", archivos)
 
             if not archivos:
                 logging.warning("⚠️ Lista de videos vacía aunque la carpeta existe.")
@@ -1744,6 +1746,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     path = os.path.join(ruta_videos, nombre)
                     size = os.path.getsize(path)
                     logging.info(f"🎥 Enviando: {nombre} — {size / 1024:.2f} KB")
+                    print(f"📤 DEBUG: Enviando {nombre} a {cid}")
 
                     with open(path, "rb") as video_file:
                         await ctx.bot.send_video(
@@ -1752,6 +1755,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
                             parse_mode="Markdown"
                         )
+
                 except Exception as e:
                     logging.error(f"❌ Error enviando video '{nombre}': {e}")
                     await ctx.bot.send_message(cid, f"⚠️ No pude enviar el video {nombre}")
@@ -1770,6 +1774,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             logging.error(f"❌ Error al enviar videos tras saludo: {e}")
             await ctx.bot.send_message(cid, "❌ Hubo un error al cargar los videos.")
             return
+
 
 
     # 🎨 Si el cliente dice "me gustaron los amarillos", "quiero los rojos", etc.
