@@ -2710,6 +2710,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "direccion": direccion
             })
 
+            # ── Precio y sale_id ──────────────────────────────
             precio = next(
                 (i["precio"] for i in inv
                  if normalize(i["marca"]) == normalize(est["marca"])
@@ -2720,7 +2721,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["precio_total"] = int(precio) if precio else 0
             est["sale_id"] = generate_sale_id()
 
-            resumen = (
+            # ── Guardar RESUMEN dict ─────────────────────────
+            est["resumen"] = {
+                "Número Venta": est["sale_id"],
+                "Fecha Venta":  datetime.now().isoformat(),
+                "Cliente":      nombre,
+                "Teléfono":     telefono,
+                "Cédula":       cedula,
+                "Producto":     est["modelo"],
+                "Color":        est["color"],
+                "Talla":        est["talla"],
+                "Correo":       correo,
+                "Pago":         None,
+                "Estado":       "PENDIENTE"
+            }
+
+            # ── Mensaje para confirmar o editar ──────────────
+            resumen_msg = (
                 f"✅ Pedido: {est['sale_id']}\n"
                 f"👤Nombre: {nombre}\n"
                 f"📧Correo: {correo}\n"
@@ -2729,17 +2746,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
                 f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
                 f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                "¿Cómo deseas hacer el pago?\n"
-                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
-                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
-                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
-                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
+                "¿Estos datos siguen siendo correctos o deseas cambiar algo?\n"
+                "• Responde *sí* si todo está bien.\n"
+                "• O dime el campo a cambiar (nombre, correo, teléfono, etc.)."
             )
 
-            est["fase"] = "esperando_pago"
+            est["fase"] = "confirmar_datos_guardados"   # ⬅️  Primero confirmar / editar
             estado_usuario[cid] = est
-            await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+            await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
             return
+
 
         # 🧾 No hay cliente guardado → continuar normal
         est["fase"] = "esperando_nombre"
@@ -3088,6 +3104,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Valor Final": valor_final
             })
 
+            estado_usuario[cid] = est
             msg = (
                 "🟢 Elegiste *TRANSFERENCIA*.\n\n"
                 f"💰 Valor original: {precio_original:,} COP\n"
@@ -3100,6 +3117,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+            return
 
         elif metodo_detectado == "contraentrega":
             est["fase"] = "esperando_comprobante"
@@ -3109,6 +3127,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Valor Anticipo": 35000
             })
 
+            estado_usuario[cid] = est
             msg = (
                 "🟡 Elegiste *CONTRAENTREGA*.\n\n"
                 "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
@@ -3119,6 +3138,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+            return
 
         elif metodo_detectado == "addi":
             est["fase"] = "esperando_datos_addi"
@@ -3139,6 +3159,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             return
+
 
     # ────────────────────────────────────────────────
     # ⏸️ PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
