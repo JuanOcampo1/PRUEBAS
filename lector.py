@@ -1873,50 +1873,71 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
     # 🟨 Detección universal de color — funciona en cualquier fase
-    if detectar_color(txt):
-        color = detectar_color(txt)
+    try:
+        if detectar_color(txt):
+            color = detectar_color(txt)
+            logging.info(f"[COLOR] Petición de color → {color} | CID: {cid}")
 
-        ruta = "/var/data/modelos_video"
-        if not os.path.exists(ruta):
-            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
-            return
+            ruta = "/var/data/modelos_video"
+            if not os.path.exists(ruta):
+                logging.warning(f"[COLOR] Carpeta no existe: {ruta}")
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+                return
 
-        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
-        coincidencias = [
-            f for f in os.listdir(ruta)
-            if f.lower().endswith(".jpg")
-            and any(alias in f.lower() for alias in aliases_del_color)
-        ]
+            aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
+            logging.debug(f"[COLOR] Aliases del color: {aliases_del_color}")
 
-        if not coincidencias:
-            await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.")
-            return
+            coincidencias = [
+                f for f in os.listdir(ruta)
+                if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases_del_color)
+            ]
 
-        await ctx.bot.send_message(cid, f"🎨 ¡Perfecto! Aquí tienes modelos en color *{color.upper()}*:")
-        for archivo in coincidencias:
-            try:
+            logging.info(f"[COLOR] Coincidencias encontradas: {coincidencias}")
+
+            if not coincidencias:
+                await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.")
+                return
+
+            await ctx.bot.send_message(cid, f"🎨 ¡Perfecto! Aquí tienes modelos en color *{color.upper()}*:")
+
+            errores_envio = 0
+            for archivo in coincidencias:
                 path = os.path.join(ruta, archivo)
                 modelo = archivo.replace(".jpg", "").replace("_", " ")
-                await ctx.bot.send_photo(
-                    chat_id=cid,
-                    photo=open(path, "rb"),
-                    caption=f"📸 Modelo *{modelo}* en color *{color.upper()}*",
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logging.error(f"❌ Error enviando imagen: {e}")
-                await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
 
-        await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
-        est["color"] = color
-        est["fase"] = "esperando_modelo_elegido"
-        estado_usuario[cid] = est
+                try:
+                    await ctx.bot.send_photo(
+                        chat_id=cid,
+                        photo=open(path, "rb"),
+                        caption=f"📸 Modelo *{modelo}* en color *{color.upper()}*",
+                        parse_mode="Markdown"
+                    )
+                    logging.debug(f"[COLOR] Imagen enviada: {archivo}")
+                except Exception as e:
+                    errores_envio += 1
+                    logging.error(f"❌ Error enviando {archivo}: {e}")
+
+            if errores_envio:
+                await ctx.bot.send_message(cid, f"⚠️ No pude enviar {errores_envio} de {len(coincidencias)} imágenes.")
+
+            await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+
+            est["color"] = color
+            est["fase"] = "esperando_modelo_elegido"
+            estado_usuario[cid] = est
+            return
+    except Exception as e:
+        logging.error(f"❌ Error en bloque de detección de color: {e}")
+        await ctx.bot.send_message(cid, "❌ Ocurrió un problema al procesar el color. Intenta de nuevo.")
         return
+
 
     # 🟦 El cliente ya vio los modelos y confirma: "quiero los 279", "sí esos", etc.
     if est.get("fase") == "esperando_modelo_elegido":
+        logging.debug(f"[CONFIRMA MODELO] Texto: {txt_raw}")
+
         referencia_mencionada = re.search(r"\b(279|304|305)\b", txt)
-        afirmacion = any(palabra in txt for palabra in (
+        afirmacion = any(p in txt for p in (
             "sí", "s", "esos", "quiero", "me gustaron", "me sirven",
             "ese", "perfecto", "dale", "me encanta", "lo quiero"
         ))
@@ -1924,41 +1945,39 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ref_final = ""
         if referencia_mencionada:
             ref_final = referencia_mencionada.group(1)
+            logging.info(f"[CONFIRMA MODELO] Número detectado: {ref_final}")
         elif afirmacion:
             ref_final = est.get("referencia") or est.get("ultimo_modelo", "")
+            logging.info(f"[CONFIRMA MODELO] Afirmación sin número, usando ref: {ref_final}")
 
         if ref_final:
             # ── Guardar datos clave ─────────────────────────────────
-            est["referencia"] = ref_final
-            est["modelo"]     = ref_final
-            est["color"]      = est.get("color", "")
-            if not est.get("marca"):      # marca por defecto si viene de video
-                est["marca"] = "DS"
-
+            est.update({
+                "referencia": ref_final,
+                "modelo":     ref_final,
+                "marca":      est.get("marca") or "DS"
+            })
             modelo = est["modelo"]
-            color  = est["color"]
+            color  = est.get("color", "")
 
-            # ── Alias de color ─────────────────────────────────────
-            def colores_equivalentes(base: str):
-                b  = normalize(base)
-                eq = {b}
-                for alias, real in color_aliases.items():
-                    if normalize(alias) == b or normalize(real) == b:
-                        eq.update({normalize(alias), normalize(real)})
-                return eq
+            # ── Precio desde Google Sheets ─────────────────────────
+            try:
+                equivalentes = {normalize(color)} | {
+                    normalize(a) for a, b in color_aliases.items()
+                    if normalize(b) == normalize(color)
+                }
+                precio = next(
+                    (row.get("precio") for row in inv
+                     if normalize(row.get("modelo", "")) == normalize(modelo)
+                     and any(eq in normalize(row.get("color", "")) for eq in equivalentes)),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else 0
+            except Exception as e:
+                logging.error(f"[CONFIRMA MODELO] Error buscando precio: {e}")
+                est["precio_total"] = 0
 
-            equivalentes = colores_equivalentes(color)
-
-            # ── Precio desde Google Sheets (comparación flexible) ──
-            precio = next(
-                (row.get("precio") for row in inv
-                 if normalize(row.get("modelo", "")) == normalize(modelo)
-                 and any(eq in normalize(row.get("color", "")) for eq in equivalentes)),
-                None
-            )
-            est["precio_total"] = int(precio) if precio else 0
-
-            # ── Tallas disponibles usando alias ────────────────────
+            # ── Tallas disponibles ─────────────────────────────────
             tallas = obtener_tallas_por_color_alias(inv, modelo, color)
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
@@ -1990,6 +2009,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*."
         )
         return
+
 
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
