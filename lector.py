@@ -876,15 +876,17 @@ async def enviar_welcome_venom(cid: str):
     try:
         audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
 
-        logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {os.path.exists(audio_path)}")
+        existe = os.path.exists(audio_path)
+        logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {existe}")
 
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"No se encontró el archivo: {audio_path}")
+        if not existe:
+            raise FileNotFoundError(f"❌ No se encontró el archivo: {audio_path}")
 
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
 
         logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
+        logging.info(f"🧪 Base64 preview: {b64[:80]}...")
 
         return {
             "type": "multi",
@@ -892,8 +894,8 @@ async def enviar_welcome_venom(cid: str):
                 {
                     "type": "audio",
                     "base64": b64,
-                    "mimetype": "audio/mpeg",  # 👈 correcto
-                    "filename": "bienvenida1.mp3",  # 👈 ahora sí es exacto
+                    "mimetype": "audio/mpeg",  # 👈 WhatsApp lo requiere así
+                    "filename": "bienvenida1.mp3",
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
                 {
@@ -916,8 +918,9 @@ async def enviar_welcome_venom(cid: str):
         logging.error(f"❌ Error al preparar audio bienvenida: {e}")
         return {
             "type": "text",
-            "text": "❌ Hubo un error enviando el mensaje de bienvenida."
+            "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
         }
+
 
 
 CLIP_INSTRUCTIONS = (
