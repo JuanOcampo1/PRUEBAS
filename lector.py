@@ -870,7 +870,7 @@ EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
 async def enviar_welcome_venom(cid: str):
     try:
-        audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
+        audio_path = "/var/data/audios/bienvenida/bienvenida1.ogg"
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
 
@@ -880,8 +880,8 @@ async def enviar_welcome_venom(cid: str):
                 {
                     "type": "audio",
                     "base64": b64,
-                    "mimetype": "audio/mpeg",
-                    "filename": "bienvenida1.mp3",
+                    "mimetype": "audio/ogg",
+                    "filename": "bienvenida1.ogg",
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
                 {
@@ -895,7 +895,7 @@ async def enviar_welcome_venom(cid: str):
                 },
                 {
                     "type": "text",
-                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en que te ayudo"
+                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en qué te ayudo"
                 }
             ]
         }
@@ -906,6 +906,7 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ Hubo un error enviando el mensaje de bienvenida."
         }
+
 
 
 CLIP_INSTRUCTIONS = (
@@ -1484,90 +1485,47 @@ async def enviar_sticker(ctx, cid, nombre_archivo):
 # ────────────────────────────────────────────────────────────
 # FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM) CON LOGS DETALLADOS
 # ────────────────────────────────────────────────────────────
-async def enviar_video_referencia(cid, ctx, referencia):
-    logging.info(f"[VIDEO_FN] ⇢ Petición video ref={referencia!r}  cid={cid}")
-
-    opciones = {
-        # 🔥 Referencias2.mp4
-        "261": "referencias2.mp4", "ds 261": "referencias2.mp4",
-        "277": "referencias2.mp4", "ds 277": "referencias2.mp4",
-        "303": "referencias2.mp4", "ds 303": "referencias2.mp4",
-        "295": "referencias2.mp4", "ds 295": "referencias2.mp4",
-        "299": "referencias2.mp4", "ds 299": "referencias2.mp4",
-
-        # 📼 Referencias.mp4
-        "279": "referencias.mp4",  "ds 279": "referencias.mp4",
-        "304": "referencias.mp4",  "ds 304": "referencias.mp4",
-        "305": "referencias.mp4",  "ds 305": "referencias.mp4",
-
-        # 👟 Otros
-        "niño": "infantil.mp4",    "niños": "infantil.mp4",
-        "infantil": "infantil.mp4","kids":  "infantil.mp4",
-
-        "promo": "descuentos.mp4", "descuento": "descuentos.mp4",
-        "descuentos": "descuentos.mp4"
-    }
-
-    nombres_real = {
-        "referencias.mp4":  "Referencias.mp4",
-        "referencias2.mp4": "Referencias2.mp4",
-        "infantil.mp4":     "Infantil.mp4",
-        "descuentos.mp4":   "Descuentos.mp4"
-    }
-
-    ref_norm = normalize(referencia).lower()
-    nombre_logico = opciones.get(ref_norm)
-    nombre_real = nombres_real.get(nombre_logico)
-    logging.debug(
-        f"[VIDEO_FN] ref_norm={ref_norm}  "
-        f"nombre_logico={nombre_logico}  nombre_real={nombre_real}"
-    )
-
-    if not nombre_real:
-        logging.warning(f"[VIDEO_FN] Video no reconocido para ref={ref_norm}")
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
-        )
-        return None
-
-    ruta_video = os.path.join("/var/data/videos", nombre_real)
-    existe = os.path.exists(ruta_video)
-    logging.debug(f"[VIDEO_FN] ruta_video={ruta_video}  existe={existe}")
-
-    if not existe:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
-        )
-        return None
-
-    tamaño = os.path.getsize(ruta_video)
-    logging.debug(f"[VIDEO_FN] Tamaño archivo='{nombre_real}' = {tamaño:,} bytes")
-
+async def enviar_todos_los_videos(cid):
     try:
-        with open(ruta_video, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
+        carpeta = "/var/data/videos"
+        archivos = [
+            f for f in os.listdir(carpeta)
+            if f.lower().endswith(".mp4")
+        ]
 
-        logging.debug(f"[VIDEO_FN] Longitud base64 = {len(b64):,} caracteres")
+        if not archivos:
+            return {
+                "type": "text",
+                "text": "⚠️ No tengo videos disponibles en este momento."
+            }
 
-        video_dict = {
-            "type": "video",
-            "base64": b64,
-            "mimetype": "video/mp4",
-            "filename": nombre_real,
-            "text": "🎬 Aquí tienes el video solicitado "
+        mensajes = []
+        for nombre in archivos:
+            ruta = os.path.join(carpeta, nombre)
+            with open(ruta, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            mensajes.append({
+                "type": "video",
+                "base64": b64,
+                "mimetype": "video/mp4",
+                "filename": nombre,
+                "text": f"🎥 Video: {nombre}"
+            })
+
+        logging.info(f"[VIDEOS] ✅ Se enviaron {len(mensajes)} videos.")
+        return {
+            "type": "multi",
+            "messages": mensajes
         }
-        logging.info(f"[VIDEO_FN] ✓ Dict video listo para enviar (keys={list(video_dict.keys())})")
-        return video_dict
 
     except Exception as e:
-        logging.error(f"[VIDEO_FN] ❌ Error leyendo/enviando video: {e}")
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❌ No logré enviarte el video. Intenta de nuevo."
-        )
-        return None
+        logging.error(f"❌ Error al enviar videos: {e}")
+        return {
+            "type": "text",
+            "text": "❌ No logré enviarte los videos. Intenta más tarde."
+        }
+
 
 
 
@@ -1710,7 +1668,47 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     numero = str(cid)
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
+    # 👋 Detectar saludo inicial y responder con bienvenida + videos
+    if any(p in txt for p in ("hola", "buenas", "buenos días", "buenas tardes", "buenas noches")):
+        # 1. Mensaje de bienvenida
+        await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                "Rastrear pedido", "Realizar cambio"
+            ])
+        )
 
+        # 2. Envío automático de todos los videos disponibles
+        ruta_videos = "/var/data/videos"
+        try:
+            archivos = sorted([
+                f for f in os.listdir(ruta_videos)
+                if f.lower().endswith(".mp4")
+            ])
+            if archivos:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                )
+                for nombre in archivos:
+                    path = os.path.join(ruta_videos, nombre)
+                    await ctx.bot.send_video(
+                        chat_id=cid,
+                        video=open(path, "rb"),
+                        caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
+                        parse_mode="Markdown"
+                    )
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="🧐 ¿Cuál de estos modelos te interesa?"
+                )
+                est = {"fase": "esperando_modelo_elegido"}
+                estado_usuario[cid] = est
+                return
+        except Exception as e:
+            logging.error(f"❌ Error al enviar videos tras saludo: {e}")
+ 
     if cid not in estado_usuario:
         est = {"fase": "inicio"}
         estado_usuario[cid] = est
@@ -1969,72 +1967,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             return
-
-
-    # 🎬 Petición de video — general o específica
-    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
-        # Revisa si la frase incluye una referencia específica conocida
-        referencias_validas = {
-            "261", "ds 261", "277", "ds 277", "303", "ds 303",
-            "295", "ds 295", "299", "ds 299",
-            "279", "ds 279", "304", "ds 304", "305", "ds 305",
-            "niño", "niños", "kids", "infantil", "promo", "descuento", "descuentos"
-        }
-
-        ref = normalize(txt)
-        if ref in referencias_validas:
-            # Usa flujo de video individual
-            video_respuesta = await enviar_video_referencia(cid, ctx, ref)
-            logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
-
-            if isinstance(video_respuesta, dict):
-                est["video_activo"] = ref
-                est["fase"] = "esperando_color_post_video"
-                estado_usuario[cid] = est
-                return video_respuesta
-
-            est["fase"] = "inicio"
-            estado_usuario[cid] = est
-            return
-
-        # Si no especifica referencia, se envían todos los videos
-        ruta_videos = "/var/data/videos"
-        try:
-            archivos = sorted([
-                f for f in os.listdir(ruta_videos)
-                if f.lower().endswith(".mp4")
-            ])
-            if not archivos:
-                await ctx.bot.send_message(chat_id=cid, text="⚠️ No hay videos disponibles en este momento.")
-                return
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🎬 Te muestro todas nuestras referencias en video. ¡Revisa estos modelos con calma!"
-            )
-
-            for nombre in archivos:
-                path = os.path.join(ruta_videos, nombre)
-                await ctx.bot.send_video(
-                    chat_id=cid,
-                    video=open(path, "rb"),
-                    caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
-                    parse_mode="Markdown"
-                )
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🧐 ¿Cuál de estos modelos te interesa?"
-            )
-            est["fase"] = "esperando_modelo_elegido"
-            estado_usuario[cid] = est
-            return
-
-        except Exception as e:
-            logging.error(f"❌ Error al enviar videos masivos: {e}")
-            await ctx.bot.send_message(chat_id=cid, text="❌ Hubo un problema al enviar los videos.")
-        return
-
 
     # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
     if est.get("fase") == "esperando_color_post_video":
@@ -4165,7 +4097,7 @@ async def venom_webhook(req: Request):
                         estado_usuario[cid] = est
                         return JSONResponse({
                             "type": "text",
-                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
+                            "text": f"📏 Según la etiqueta que me envias, la talla ideal para tus zapatos es la *{talla_detectada}* en nuestra horma. ¿Deseas que te las enviemos hoy mismo?",
                             "parse_mode": "Markdown"
                         })
                     else:
