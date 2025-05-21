@@ -884,6 +884,7 @@ async def enviar_welcome_venom(cid: str):
 
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
+            b64_final = f"data:audio/mpeg;base64,{b64}"  # ✅ encabezado MIME agregado
 
         logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
         logging.info(f"🧪 Base64 preview: {b64[:80]}...")
@@ -893,8 +894,8 @@ async def enviar_welcome_venom(cid: str):
             "messages": [
                 {
                     "type": "audio",
-                    "base64": b64,
-                    "mimetype": "audio/mpeg",  # 👈 WhatsApp lo requiere así
+                    "base64": b64_final,  # ✅ ahora con encabezado
+                    "mimetype": "audio/mpeg",  # WhatsApp lo requiere así
                     "filename": "bienvenida1.mp3",
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
@@ -920,6 +921,7 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
         }
+
 
 
 
