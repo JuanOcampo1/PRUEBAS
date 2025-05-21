@@ -3868,10 +3868,47 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
-    if texto in ("/start", "start", "hola", "buenas", "hey"):
+    if any(p in txt for p in ("/start", "start", "hola", "buenas", "buenos días", "buenas tardes", "buenas noches", "hey")):
         reset_estado(cid)
-        return await enviar_welcome_venom(cid)
+        mensajes = [await enviar_welcome_venom(cid)]
 
+        try:
+            carpeta = "/var/data/videos"
+            archivos = sorted([
+                f for f in os.listdir(carpeta)
+                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
+            ])
+
+            videos = []
+            for nombre in archivos:
+                path = os.path.join(carpeta, nombre)
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                    videos.append({
+                        "type": "video",
+                        "base64": f"data:video/mp4;base64,{b64}",
+                        "text": f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                    })
+
+            if videos:
+                videos.insert(0, {
+                    "type": "text",
+                    "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                })
+                videos.append({
+                    "type": "text",
+                    "text": "🧐 ¿Cuál de estos modelos te interesa?"
+                })
+                mensajes.extend(videos)
+
+            return {"type": "multi", "messages": mensajes}
+
+        except Exception as e:
+            logging.error(f"❌ Error cargando videos desde /var/data/videos: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
+            }
 
     # 🔊 Petición de audio
     if any(f in txt for f in (
@@ -3950,7 +3987,7 @@ async def venom_webhook(req: Request):
     try:
         data = await req.json()
         cid = wa_chat_id(data.get("from", ""))
-        body = data.get("body", "") or ""
+        body = str(data.get("body") or "").strip().lower()
         mtype = (data.get("type") or "").lower()
         mimetype = (data.get("mimetype") or "").lower()
 
