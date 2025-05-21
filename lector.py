@@ -3870,24 +3870,40 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     if any(p in txt for p in ("/start", "start", "hola", "buenas", "buenos días", "buenas tardes", "buenas noches", "hey")):
         reset_estado(cid)
-        mensajes = [await enviar_welcome_venom(cid)]
+
+        # 1. Obtener welcome con audio + textos
+        bienvenida = await enviar_welcome_venom(cid)
+        mensajes = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
 
         try:
+            # 2. Cargar videos desde disco
             carpeta = "/var/data/videos"
             archivos = sorted([
                 f for f in os.listdir(carpeta)
                 if f.lower().endswith(".mp4") and "confianza" not in f.lower()
             ])
 
+            # 3. Diccionario de nombres personalizados con emojis
+            nombres_con_emojis = {
+                "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
+                "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
+                "Descuentos.mp4":   "👟 Referencias 🔝 🔥 Promo 39 % Off 🔥",
+                "Infantil.mp4":     "👟 Referencias 🔝 🔥 Niños 🔥"
+            }
+
             videos = []
             for nombre in archivos:
                 path = os.path.join(carpeta, nombre)
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
+                    texto = nombres_con_emojis.get(
+                        nombre,
+                        f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                    )
                     videos.append({
                         "type": "video",
                         "base64": f"data:video/mp4;base64,{b64}",
-                        "text": f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                        "text": texto
                     })
 
             if videos:
@@ -3909,6 +3925,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
+
+
 
     # 🔊 Petición de audio
     if any(f in txt for f in (
