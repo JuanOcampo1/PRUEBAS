@@ -179,6 +179,11 @@ def descargar_imagen_lengueta():
 
 CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
 
+import os
+import io
+import logging
+from googleapiclient.http import MediaIoBaseDownload
+
 def descargar_audios_bienvenida_drive():
     """
     Descarga audios desde la subcarpeta 'BIENVENIDA' dentro de la carpeta 'Audios' en Google Drive.
@@ -187,10 +192,18 @@ def descargar_audios_bienvenida_drive():
     try:
         print(">>> descargar_audios_bienvenida_drive() – iniciando")
         service = get_drive_service()
-        os.makedirs("/var/data/audios/bienvenida", exist_ok=True)
+        carpeta_bienvenida = "/var/data/audios/bienvenida"
+        os.makedirs(carpeta_bienvenida, exist_ok=True)
 
         logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
         logging.info(f"🆔 Carpeta raíz: {CARPETA_AUDIOS_DRIVE}")
+
+        # 🧹 Limpiar carpeta antes de descargar
+        for f in os.listdir(carpeta_bienvenida):
+            archivo = os.path.join(carpeta_bienvenida, f)
+            if os.path.isfile(archivo):
+                os.remove(archivo)
+                logging.info(f"🧹 Eliminado archivo viejo: {archivo}")
 
         # Buscar subcarpeta 'BIENVENIDA'
         subfolder = service.files().list(
@@ -213,11 +226,7 @@ def descargar_audios_bienvenida_drive():
 
         for audio in audios:
             nombre_archivo = audio["name"]
-            ruta_destino = os.path.join("/var/data/audios/bienvenida", nombre_archivo)
-
-            if os.path.exists(ruta_destino):
-                logging.info(f"📦 Ya existe: {nombre_archivo} — omitiendo descarga.")
-                continue
+            ruta_destino = os.path.join(carpeta_bienvenida, nombre_archivo)
 
             logging.info(f"⬇️ Descargando audio: {nombre_archivo}")
             request = service.files().get_media(fileId=audio["id"])
@@ -239,6 +248,7 @@ def descargar_audios_bienvenida_drive():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
         logging.error(f"❌ Error al descargar audios de bienvenida: {e}")
+
 
 # ─── Descarga del video de confianza desde Drive ─────────────────────────────
 CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
