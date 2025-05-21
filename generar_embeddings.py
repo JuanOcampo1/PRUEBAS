@@ -14,7 +14,7 @@ from torch.nn.functional import normalize
 # Configuración
 logging.basicConfig(level=logging.INFO)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # ID de la carpeta raíz en Google Drive
+FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'
 
 # 🔐 Cargar credenciales desde variable de entorno (Render)
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
@@ -25,12 +25,16 @@ clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_model.eval()
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
+# Usar CPU (en Render no hay GPU por defecto)
+device = "cpu"
+clip_model.to(device)
+
 def generar_embedding(image: Image.Image):
-    inputs = clip_processor(images=image, return_tensors="pt")
+    inputs = clip_processor(images=image, return_tensors="pt").to(device)
     with torch.no_grad():
         emb = clip_model.get_image_features(**inputs)
-        emb = normalize(emb, dim=-1)  # ✅ Normalizar para usar similitud coseno correctamente
-    return emb[0].numpy().tolist()
+        emb = normalize(emb, dim=-1)
+    return emb[0].cpu().numpy().tolist()
 
 def cargar_servicio_drive():
     return build('drive', 'v3', credentials=creds)
@@ -49,19 +53,21 @@ def listar_imagenes(service, folder_id):
 
 def descargar_imagen(service, file_id):
     request = service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    fh.seek(0)
-    return Image.open(fh).convert("RGB")
+    with open("/tmp/tmpimg.jpg", "wb") as f:
+        downloader = MediaIoBaseDownload(f, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+    return Image.open("/tmp/tmpimg.jpg").convert("RGB")
 
 def main():
     service = cargar_servicio_drive()
     carpetas = listar_carpetas(service, FOLDER_ID)
     logging.info(f"📦 Se encontraron {len(carpetas)} carpetas de modelos.")
 
+    # Guardar incrementalmente
+    os.makedirs("/var/data", exist_ok=True)
+    ruta_embeds = "/var/data/embeddings.json"
     embeddings = {}
 
     for carpeta in carpetas:
@@ -77,18 +83,18 @@ def main():
                 imagen = descargar_imagen(service, img["id"])
                 emb = generar_embedding(imagen)
                 modelo_embeddings.append(emb)
+                del imagen  # 🔥 Liberar imagen
             except Exception as e:
                 logging.warning(f"⚠️ Error con {img['name']}: {e}")
 
         if modelo_embeddings:
-            embeddings[modelo] = modelo_embeddings if len(modelo_embeddings) > 1 else [modelo_embeddings[0]]
+            embeddings[modelo] = modelo_embeddings
 
-    # ✅ Guardar como embeddings.json en disco de Render
-    os.makedirs("/var/data", exist_ok=True)
-    with open("/var/data/embeddings.json", "w") as f:
-        json.dump(embeddings, f)
+        # 🔃 Guardar parcialmente para evitar pérdida por corte
+        with open(ruta_embeds, "w") as f:
+            json.dump(embeddings, f)
 
-    logging.info("🎉 Archivo embeddings.json creado con éxito en /var/data/")
+    logging.info("✅ embeddings.json guardado exitosamente.")
 
 if __name__ == "__main__":
     main()
