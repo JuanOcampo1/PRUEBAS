@@ -4174,10 +4174,30 @@ async def venom_webhook(req: Request):
                         )
                         os.remove(temp_path)
                         reset_estado(cid)
+
+                        # ✅ Enviar texto + sticker de fin de compra
+                        try:
+                            sticker_path = "/var/data/stickers/sticker_fin_de_compra_sticker_final.webp"
+                            if os.path.exists(sticker_path):
+                                with open(sticker_path, "rb") as f:
+                                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                                return JSONResponse({
+                                    "type": "multi",
+                                    "messages": [
+                                        {"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"},
+                                        {"type": "sticker", "base64": f"data:image/webp;base64,{b64}"}
+                                    ]
+                                })
+                        except Exception as e:
+                            logging.error(f"❌ Error al cargar el sticker de fin de compra: {e}")
+
+                        # fallback si falla el sticker
                         return JSONResponse({
                             "type": "text",
                             "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"
                         })
+
                     else:
                         os.remove(temp_path)
                         return JSONResponse({
@@ -4191,7 +4211,6 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
-
 
 
 
