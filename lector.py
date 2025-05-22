@@ -3156,65 +3156,64 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 estado_usuario[cid] = est
 
 
-        # ────────────────────────────────────────────────
-        # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
-        # ────────────────────────────────────────────────
-        if est.get("fase") == "esperando_datos_addi":
-            try:
-                # txt_raw ≡ mensaje original sin limpiar
-                partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
-                nombre = partes[0] if len(partes) >= 1 else ""
+    # ────────────────────────────────────────────────────────────────
+    # 📋 DATOS PARA ADDI – PRIORIDAD TOTAL PARA EVITAR ERRORES
+    # ────────────────────────────────────────────────────────────────
+    if est.get("fase") == "esperando_datos_addi":
+        try:
+            partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
+            nombre = partes[0] if len(partes) >= 1 else ""
 
-                cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
-                correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
-                telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
+            cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
+            correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
+            telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
 
-                if not (nombre and cedula_match and correo_match and telefono_match):
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
-                            "Envíame 4 líneas así:\n"
-                            "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                    return  # sigue en la misma fase
-
-                datos_addi = {
-                    "Cliente":   nombre.title(),
-                    "Cédula":    cedula_match.group(0),
-                    "Teléfono":  telefono_match.group(0),
-                    "Correo":    correo_match.group(0),
-                    "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-
-                if registrar_orden_unificada(datos_addi, destino="ADDI"):
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
-                            "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
-                        )
-                    )
-                    # ⏸️ Bloquea el chat 24 h
-                    est["fase"]        = "pausado_addi"
-                    est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
-                    estado_usuario[cid] = est
-                else:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
-                    )
-                return   # ← detenemos aquí el flujo
-
-            except Exception as e:
-                logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
+            if not (nombre and cedula_match and correo_match and telefono_match):
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
+                    text=(
+                        "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
+                        "Envíame 4 líneas así:\n"
+                        "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
+                    ),
+                    parse_mode="Markdown"
                 )
-                return
+                return  # sigue en la misma fase
+
+            datos_addi = {
+                "Cliente":   nombre.title(),
+                "Cédula":    cedula_match.group(0),
+                "Teléfono":  telefono_match.group(0),
+                "Correo":    correo_match.group(0),
+                "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+            if registrar_orden_unificada(datos_addi, destino="ADDI"):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
+                        "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
+                    )
+                )
+                est["fase"]        = "pausado_addi"
+                est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
+                estado_usuario[cid] = est
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
+                )
+            return
+
+        except Exception as e:
+            logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
+            )
+            return
+
 
 
 
@@ -3813,8 +3812,13 @@ async def manejar_catalogo(update, ctx):
     txt = getattr(update.message, "text", "").lower()
 
     if menciona_catalogo(txt):
-
-        await ctx.bot.send_message(chat_id=cid, text=mensaje)
+        # 📝 Primero el mensaje con el link
+        mensaje = (
+            f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
+            f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}\n"
+            "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
+        )
+        ctx.resp.append({"type": "text", "text": mensaje})
 
         # 🧷 Luego el sticker (para que quede de último)
         try:
@@ -3836,7 +3840,6 @@ async def manejar_catalogo(update, ctx):
 
 
 
-
 import base64  # Asegúrate de que esté arriba del archivo
 
 # ─────────────────────────────────────────────────────────────
@@ -3846,6 +3849,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
+    # Lista de palabras afirmativas comunes
+    AFIRMATIVAS = [
+        "si", "sí", "sii", "sis", "sisz", "siss", "de una", "dale", "hágale", "hagale", 
+        "hágale pues", "me gusta", "quiero", "lo quiero", "vamos", "claro", 
+        "obvio", "eso es", "ese", "de ley", "de fijo", "ok", "okay", "listo"
+    ]
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -4056,6 +4065,17 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 return ctx.resp[0]  # envía solo la respuesta directa (texto, foto o video)
             else:
                 return {"type": "multi", "messages": ctx.resp}
+        # ✅ Confirmar compra si usuario responde con afirmación
+        est = estado_usuario.get(cid, {})
+        if est.get("fase") == "confirmar_compra":
+            if any(pal in txt for pal in AFIRMATIVAS):
+                estado_usuario[cid]["fase"] = "esperando_direccion"
+                return {"type": "text", "text": "Perfecto 💥 ¿A qué dirección quieres que enviemos el pedido?"}
+            elif any(x in txt for x in ["cancel", "cancelar", "otra", "ver otro", "no gracias"]):
+                estado_usuario.pop(cid, None)
+                return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
+            else:
+                return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
