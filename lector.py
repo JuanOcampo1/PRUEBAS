@@ -833,14 +833,14 @@ def menciona_catalogo(texto: str) -> bool:
         "catalogo", "catálogo", "ver catálogo", "mostrar catálogo",
         "quiero ver", "ver productos", "mostrar productos",
         "ver lo que tienes", "ver tenis", "muéstrame",
-        "mostrar lo que tienes", "tenis disponibles",
+        "mostrar lo que tienes", "que estilos tiene",
         "enséñame el catálogo", "Tienes imagenes", "mandame el catalogo",
         "quiero ver modelos", "ver referencias", "quiero referencias",
         "muestrame los modelos", "qué modelos tienes", "que modelos hay",
         "que tienes", "mandame fotos", "mandame las imagenes",
         "envíame modelos", "quiero ver imágenes", "tenis que tienes",
         "que hay", "quiero ver los pares", "muestra los tenis",
-        "cuales modelos tienes", "que pares hay"
+        "cuales modelos tienes", "mande fotos"
     ]
 
     # Variantes mal escritas
@@ -4219,13 +4219,11 @@ async def venom_webhook(req: Request):
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
-                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"💲 Su precio es: *{precio_str}* y hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
                         })
-
                     else:
                         reset_estado(cid)
                         return JSONResponse({
@@ -4242,6 +4240,7 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
+
 
 
         # 💬 TEXTO
