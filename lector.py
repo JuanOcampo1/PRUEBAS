@@ -3098,7 +3098,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 No entendí el método de pago. Escribe *transferencia*, *contraentrega* o *Addi* 😊",
+                text="💳 Dime porfa como deseas pagar *transferencia*, *contraentrega* o *Addi* 😊",
                 parse_mode="Markdown"
             )
             return
@@ -3200,34 +3200,33 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
     # ────────────────────────────────────────────────────────────────
-    # 📋 DATOS PARA ADDI – PRIORIDAD TOTAL PARA EVITAR ERRORES
+    # 📋 DATOS PARA ADDI – VERSIÓN TOLERANTE
     # ────────────────────────────────────────────────────────────────
     if est.get("fase") == "esperando_datos_addi":
         try:
-            partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
-            nombre = partes[0] if len(partes) >= 1 else ""
+            # 1. Separa en líneas no vacías
+            partes = [p.strip() for p in body.splitlines() if p.strip()]
 
-            cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
-            correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
-            telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
-
-            if not (nombre and cedula_match and correo_match and telefono_match):
+            # 2. Necesitamos exactamente 4 líneas con algún contenido
+            if len(partes) < 4:
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
+                        "❌ *Faltan datos.*\n\n"
                         "Envíame 4 líneas así:\n"
                         "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
                     ),
                     parse_mode="Markdown"
                 )
-                return  # sigue en la misma fase
+                return  # sigue esperando
+
+            nombre, cedula, correo, telefono = partes[:4]
 
             datos_addi = {
                 "Cliente":   nombre.title(),
-                "Cédula":    cedula_match.group(0),
-                "Teléfono":  telefono_match.group(0),
-                "Correo":    correo_match.group(0),
+                "Cédula":    cedula,
+                "Teléfono":  telefono,
+                "Correo":    correo,
                 "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
@@ -3236,7 +3235,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     chat_id=cid,
                     text=(
                         "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
-                        "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
+                        "Enseguida me comunico para seguir el proceso. 💙"
                     )
                 )
                 est["fase"]        = "pausado_addi"
@@ -3256,6 +3255,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
             )
             return
+
 
 
 
