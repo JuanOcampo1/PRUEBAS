@@ -4068,18 +4068,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ─── MAIN try/except ───
     try:
+        # 🛠️ DEFINIR dummy_update ANTES DE USARLO
+        dummy_msg = DummyMsg(text=body, ctx=ctx)
+        dummy_update = SimpleNamespace(
+            message=dummy_msg,
+            effective_chat=SimpleNamespace(id=cid)
+        )
+
         reply = await responder(dummy_update, ctx)
-        # 🧭 ─────────────────────────
-        # ¿Pidió ver el catálogo?
-        # Llama a manejar_catalogo() para que añada el sticker + link
-        # y, si fue el caso, salimos antes de continuar con el resto del flujo.
-        # ───────────────────────────
+
+        # 🧭 Manejo del catálogo si el usuario lo menciona
         if await manejar_catalogo(dummy_update, ctx):
-            # manejar_catalogo ya añadió el/los mensajes a ctx.resp
-            if ctx.resp:                       # hay sticker (y/o texto) en la cola
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
+            if ctx.resp:
                 return {"type": "multi", "messages": ctx.resp}
-            # por seguridad devolvemos algo, aunque no debería ocurrir
-            return {"type": "text", "text": "👀 Revisa el catálogo que te envié arriba."}
+            return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
 
         # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
         if isinstance(reply, dict):
@@ -4088,9 +4092,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
             if len(ctx.resp) == 1:
-                return ctx.resp[0]  # envía solo la respuesta directa (texto, foto o video)
+                return ctx.resp[0]
             else:
                 return {"type": "multi", "messages": ctx.resp}
+
         # ✅ Confirmar compra si usuario responde con afirmación
         est = estado_usuario.get(cid, {})
         if est.get("fase") == "confirmar_compra":
@@ -4102,6 +4107,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
             else:
                 return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
+
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
