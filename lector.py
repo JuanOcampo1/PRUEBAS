@@ -1,4 +1,3 @@
-FALLANDO PERO MAS AVANZADO 
 # ——— Librerías estándar de Python ———
 import os
 import io
