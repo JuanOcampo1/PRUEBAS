@@ -1866,12 +1866,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             estado_usuario[cid] = est
             return
 
-    if await manejar_catalogo(dummy_update, ctx):
-        est["fase"] = "inicio"
-        estado_usuario[cid] = est  # ✅ aseguras que se guarde la fase
-        if ctx.resp:
-            return {"type": "multi", "messages": ctx.resp}
-        return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
 
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
@@ -3904,6 +3898,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         return f"data:{tipo};base64,{b64}"
 
     # ───────────────────────────────────────────
+    # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw):
             self.resp.append({"type": "text", "text": text})
@@ -3940,22 +3935,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         send_photo=ctx.bot_send_photo
     )
 
+    # ───────────────────────── DummyMsg (definido una sola vez) ─────────────────────────
     class DummyMsg(SimpleNamespace):
         def __init__(self, text, ctx, photo=None, voice=None, audio=None):
-            self.text = text
+            self.text  = text
             self.photo = photo
             self.voice = voice
             self.audio = audio
-            self._ctx = ctx
+            self._ctx  = ctx
 
         async def reply_text(self, text, **kw):
             self._ctx.resp.append({"type": "text", "text": text})
 
+    # ─────────────── Crear dummy_msg y dummy_update ───────────────
     dummy_msg = DummyMsg(text=body, ctx=ctx)
     dummy_update = SimpleNamespace(
         message=dummy_msg,
         effective_chat=SimpleNamespace(id=cid)
     )
+
+
+
 
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
@@ -4068,13 +4068,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ─── MAIN try/except ───
     try:
-        # 🛠️ DEFINIR dummy_update ANTES DE USARLO
-        dummy_msg = DummyMsg(text=body, ctx=ctx)
-        dummy_update = SimpleNamespace(
-            message=dummy_msg,
-            effective_chat=SimpleNamespace(id=cid)
-        )
-
         reply = await responder(dummy_update, ctx)
 
         # 🧭 Manejo del catálogo si el usuario lo menciona
