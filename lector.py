@@ -979,10 +979,7 @@ CLIP_INSTRUCTIONS = (
     "selecciona “Galería” o “Archivo” y elige la foto."
 )
 CATALOG_LINK = "https://wa.me/c/573007607245"
-CATALOG_MESSAGE = (
-    f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
-    f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
-)
+
 
 def fase_valida(fase: str) -> bool:
     fases_validas = [
@@ -3810,8 +3807,8 @@ async def manejar_catalogo(update, ctx):
     if menciona_catalogo(txt):
         # 📝 Primero el mensaje con el link
         mensaje = (
-            "🛍️ ¡Claro! Aquí tienes el catálogo más reciente:\n"
-            "👉 https://wa.me/c/573007607245\n"
+            f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
+            f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}\n"
             "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
         )
         await ctx.bot.send_message(chat_id=cid, text=mensaje)
@@ -3833,6 +3830,7 @@ async def manejar_catalogo(update, ctx):
         return True
 
     return False
+
 
 
 
