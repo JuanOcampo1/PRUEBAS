@@ -2516,19 +2516,42 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         if consulta_talla:
             talla_pedida = consulta_talla.group(1)
-            est["fase"] = "esperando_lengueta"          # fase que ya usa tu flujo
+            est["fase"] = "esperando_talla"
             estado_usuario[cid] = est
 
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"✅ ¡Claro que tenemos talla {talla_pedida}! "
-                    "Para confirmar la medida exacta, envíame una foto de la *lengüeta* "
-                    "del zapato que usas normalmente. 📸"
-                ),
-                parse_mode="Markdown"
-            )
-            return  # detenemos aquí; no seguimos con el resto del bloque
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"✅ ¡Claro que tenemos talla {talla_pedida}! "
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                "del zapato que usas normalmente 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
+                }
+            else:
+                return {
+                    "type": "text",
+                    "text": (
+                        f"✅ ¡Claro que tenemos talla {talla_pedida}! "
+                        "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                    ),
+                    "parse_mode": "Markdown"
+                }
 
         # ✔️ Respuesta afirmativa para avanzar en la compra
         if any(frase in txt for frase in (
@@ -2550,7 +2573,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     ),
                     parse_mode="Markdown"
                 )
-                # ⚠️ Reentrada automática para que se dispare el flujo como si el cliente hubiera escrito "sí"
                 return await procesar_wa(cid, "sí")
 
             # 🔁 Si aún no tiene talla, pedir foto de lengüeta sin mostrar tallas
@@ -2596,6 +2618,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         reset_estado(cid)
         return
+
 
 
 
@@ -4072,6 +4095,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # 🧭 Manejo del catálogo si el usuario lo menciona
         if await manejar_catalogo(dummy_update, ctx):
+            est = estado_usuario.get(cid, {})         # ✅ asegúrate de obtener est primero
             est["fase"] = "inicio"
             estado_usuario[cid] = est
             if ctx.resp:
