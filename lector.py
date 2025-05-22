@@ -979,7 +979,11 @@ CLIP_INSTRUCTIONS = (
     "selecciona “Galería” o “Archivo” y elige la foto."
 )
 CATALOG_LINK = "https://wa.me/c/573007607245"
+CATALOG_MESSAGE = (
+    f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
+    f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
 
+)
 
 def fase_valida(fase: str) -> bool:
     fases_validas = [
@@ -3107,6 +3111,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
             return
 
+        # ────────────────────────────────────────────────
+        # 💳 DETECTÓ MÉTODO "Addi"
+        # ────────────────────────────────────────────────
         elif metodo_detectado == "addi":
             est["fase"] = "esperando_datos_addi"
             est["metodo_pago"] = "Addi"
@@ -3125,89 +3132,90 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
-            return
+            return   # ← nada más se procesa en esta vuelta
 
 
-    # ────────────────────────────────────────────────
-    # ⏸️ PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
-    # ────────────────────────────────────────────────
-    if est.get("pausa_hasta"):
-        pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
-        if datetime.now() < pausa_hasta:
-            logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
+        # ────────────────────────────────────────────────
+        # ⏸️  PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
+        # ────────────────────────────────────────────────
+        if est.get("pausa_hasta"):
+            pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
+            if datetime.now() < pausa_hasta:
+                logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
 
-            # Permitir solo imágenes si está en espera de comprobante
-            if est.get("fase") == "pausado_addi" and mtype.startswith("image"):
-                logging.info(f"[PAUSA] Imagen recibida durante pausa (permitido)")
-                # aquí puedes permitir analizar imagen si lo deseas
-                pass  # o continuar
+                # Sólo se permiten imágenes si estuviera esperando otra cosa.
+                if est.get("fase") == "pausado_addi" and mtype.startswith("image"):
+                    pass  # aquí podrías analizarlas si lo deseas
+                else:
+                    return {"status": "paused"}      # 🔇 silencio total
             else:
-                return {"status": "paused"}  # Silencio total para texto u otros
-        else:
-            # Expiró la pausa; restablecer flujo
-            est.pop("pausa_hasta", None)
-            if est.get("fase", "").startswith("pausado_"):
-                est["fase"] = "inicial"
-            estado_usuario[cid] = est
+                # La pausa expiró → reiniciamos el flujo
+                est.pop("pausa_hasta", None)
+                if est.get("fase", "").startswith("pausado_"):
+                    est["fase"] = "inicial"
+                estado_usuario[cid] = est
 
 
-    # ────────────────────────────────────────────────
-    # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
-    # ────────────────────────────────────────────────
-    if est.get("fase") == "esperando_datos_addi":
-        try:
-            partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
-            nombre = partes[0] if len(partes) >= 1 else ""
+        # ────────────────────────────────────────────────
+        # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
+        # ────────────────────────────────────────────────
+        if est.get("fase") == "esperando_datos_addi":
+            try:
+                # txt_raw ≡ mensaje original sin limpiar
+                partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
+                nombre = partes[0] if len(partes) >= 1 else ""
 
-            cedula_match = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
-            correo_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
-            telefono_match = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
+                cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
+                correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
+                telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
 
-            if not (nombre and cedula_match and correo_match and telefono_match):
+                if not (nombre and cedula_match and correo_match and telefono_match):
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
+                            "Envíame 4 líneas así:\n"
+                            "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                    return  # sigue en la misma fase
+
+                datos_addi = {
+                    "Cliente":   nombre.title(),
+                    "Cédula":    cedula_match.group(0),
+                    "Teléfono":  telefono_match.group(0),
+                    "Correo":    correo_match.group(0),
+                    "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                if registrar_orden_unificada(datos_addi, destino="ADDI"):
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
+                            "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
+                        )
+                    )
+                    # ⏸️ Bloquea el chat 24 h
+                    est["fase"]        = "pausado_addi"
+                    est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
+                    estado_usuario[cid] = est
+                else:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
+                    )
+                return   # ← detenemos aquí el flujo
+
+            except Exception as e:
+                logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=(
-                        "❌ Faltan datos o hay un formato incorrecto.\n\n"
-                        "Envíame 4 líneas así:\n"
-                        "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
-                    ),
-                    parse_mode="Markdown"
+                    text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
                 )
                 return
 
-            datos_addi = {
-                "Cliente": nombre.title(),
-                "Cédula": cedula_match.group(0),
-                "Teléfono": telefono_match.group(0),
-                "Correo": correo_match.group(0),
-                "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-
-            if registrar_orden_unificada(datos_addi, destino="ADDI"):
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
-                        "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
-                    )
-                )
-                est["fase"] = "pausado_addi"
-                est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
-                estado_usuario[cid] = est
-            else:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
-                )
-            return
-
-        except Exception as e:
-            logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
-            )
-            return
 
 
 
@@ -3805,12 +3813,7 @@ async def manejar_catalogo(update, ctx):
     txt = getattr(update.message, "text", "").lower()
 
     if menciona_catalogo(txt):
-        # 📝 Primero el mensaje con el link
-        mensaje = (
-            f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
-            f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}\n"
-            "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
-        )
+
         await ctx.bot.send_message(chat_id=cid, text=mensaje)
 
         # 🧷 Luego el sticker (para que quede de último)
