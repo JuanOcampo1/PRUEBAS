@@ -345,9 +345,6 @@ def descargar_video_confianza():
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
         logging.error(f"❌ Error descargando video de confianza: {e}")
 
-# ─── Descarga de stickers organizados por subcarpetas ───────────────────────
-CARPETA_STICKERS_DRIVE = "1mYpTq98rli3_hTXzvfCj6CgcGhrYZwCh"  # Carpeta 'Stickers'
-
 def descargar_stickers_drive():
     """
     Descarga stickers desde subcarpetas de 'Stickers' en Google Drive.
@@ -369,7 +366,7 @@ def descargar_stickers_drive():
         ).execute().get("files", [])
 
         for sub in subcarpetas:
-            nombre_subcarpeta = sub["name"].lower().replace(" ", "_")  # Ej: 'Sticker bienvenida' → 'sticker_bienvenida'
+            nombre_subcarpeta = sub["name"].lower().replace(" ", "_")  # Ej: 'Envio Gratis' → 'envio_gratis'
             id_subcarpeta = sub["id"]
 
             logging.info(f"🔎 Buscando en subcarpeta: {nombre_subcarpeta}")
@@ -408,6 +405,7 @@ def descargar_stickers_drive():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_stickers_drive:", e)
         logging.error(f"❌ Error al descargar stickers: {e}")
+
 
 
 # ─── Descarga de imágenes de catálogo desde Drive ───────────────────────
@@ -3810,14 +3808,32 @@ async def manejar_catalogo(update, ctx):
     txt = getattr(update.message, "text", "").lower()
 
     if menciona_catalogo(txt):
+        # 📝 Primero el mensaje con el link
         mensaje = (
             "🛍️ ¡Claro! Aquí tienes el catálogo más reciente:\n"
             "👉 https://wa.me/c/573007607245\n"
             "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
         )
         await ctx.bot.send_message(chat_id=cid, text=mensaje)
+
+        # 🧷 Luego el sticker (para que quede de último)
+        try:
+            sticker_path = "/var/data/stickers/catalogo_sticker_catalogo.webp"
+            if os.path.exists(sticker_path):
+                with open(sticker_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                ctx.resp.append({
+                    "type": "sticker",
+                    "base64": f"data:image/webp;base64,{b64}"
+                })
+        except Exception as e:
+            logging.error(f"❌ Error cargando sticker catálogo en manejar_catalogo: {e}")
+
         return True
+
     return False
+
 
 
 import base64  # Asegúrate de que esté arriba del archivo
@@ -3910,12 +3926,16 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
-    if any(p in txt for p in ("/start", "start", "hola", "buenas", "buenos días", "buenas tardes", "buenas noches", "hey")):
+    if any(p in txt for p in (
+        "/start", "start", "hola", "buenas", "buenos días", "buenos dias", "buenas tardes",
+        "buenas noches", "hey", "ey", "qué pasa", "que pasa", "buen día", "buen dia",
+        "saludos", "holaaa", "ehhh", "epa", "holi", "oe", "oe que más", "nose hola"
+    )):
         reset_estado(cid)
 
         # 1. Obtener welcome con audio + textos
         bienvenida = await enviar_welcome_venom(cid)
-        mensajes = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
+        bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
 
         try:
             # 2. Cargar videos desde disco
@@ -3957,7 +3977,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "type": "text",
                     "text": "🧐 ¿Cuál de estos modelos te interesa?"
                 })
-                mensajes.extend(videos)
+
+            # 4. Enviar primero los videos, luego bienvenida
+            mensajes = videos + bienvenida_msgs
 
             return {"type": "multi", "messages": mensajes}
 
@@ -3967,7 +3989,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
-
 
 
     # 🔊 Petición de audio
@@ -4012,6 +4033,17 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ─── MAIN try/except ───
     try:
         reply = await responder(dummy_update, ctx)
+        # 🧭 ─────────────────────────
+        # ¿Pidió ver el catálogo?
+        # Llama a manejar_catalogo() para que añada el sticker + link
+        # y, si fue el caso, salimos antes de continuar con el resto del flujo.
+        # ───────────────────────────
+        if await manejar_catalogo(dummy_update, ctx):
+            # manejar_catalogo ya añadió el/los mensajes a ctx.resp
+            if ctx.resp:                       # hay sticker (y/o texto) en la cola
+                return {"type": "multi", "messages": ctx.resp}
+            # por seguridad devolvemos algo, aunque no debería ocurrir
+            return {"type": "text", "text": "👀 Revisa el catálogo que te envié arriba."}
 
         # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
         if isinstance(reply, dict):
@@ -4270,7 +4302,8 @@ async def venom_webhook(req: Request):
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: *{precio_str}* y hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
@@ -4291,6 +4324,7 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
+
 
 
 
