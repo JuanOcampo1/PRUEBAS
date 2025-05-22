@@ -1268,9 +1268,6 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     return False
 
-def decodificar_imagen_base64(base64_str: str) -> Image.Image:
-    data = base64.b64decode(base64_str + "===")
-    return Image.open(io.BytesIO(data)).convert("RGB")
 
 # 🧠 Cargar base de embeddings guardados
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
@@ -4038,17 +4035,44 @@ async def venom_webhook(req: Request):
         # 🖼️ IMAGEN
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-                logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
-            except Exception as e:
-                logging.error(f"❌ No pude leer la imagen: {e}")
-                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+                logging.info("🖼️ [IMG] Recibida imagen, iniciando decodificación…")
 
-            est = estado_usuario.get(cid, {})
-            fase = est.get("fase", "")
-            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
+                # 1️⃣  Extraer la parte base64 (con o sin encabezado MIME)
+                if body.startswith("data:image") and "," in body:
+                    header, b64_data = body.split(",", 1)
+                    logging.debug(f"🖼️ [IMG] Encabezado MIME detectado: {header[:40]}…")
+                else:
+                    b64_data = body
+                    logging.debug("🖼️ [IMG] Sin encabezado MIME.")
+
+                logging.debug(f"🖼️ [IMG] Longitud base64: {len(b64_data):,} caracteres")
+
+                # 2️⃣  Decodificar **sin** forzar relleno `===`
+                img_bytes = base64.b64decode(b64_data)
+                logging.debug(f"🖼️ [IMG] Bytes decodificados: {len(img_bytes):,}")
+
+                # 3️⃣  Cargar con PIL
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                logging.info(
+                    f"✅ Imagen decodificada — Formato:{img.format}  Tamaño:{img.size}  Modo:{img.mode}"
+                )
+
+            except (base64.binascii.Error, ValueError) as e:
+                logging.error(f"❌ [IMG] Error base64: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ La imagen llegó corrupta. Intenta enviarla de nuevo."
+                })
+
+            except Exception as e:
+                logging.error(f"❌ [IMG] No pude leer la imagen: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ No pude leer la imagen 😕. Prueba con otra foto."
+                })
+
+            # ─── A partir de aquí sigue tu lógica normal (fase, OCR, CLIP, etc.) ───
+
 
             # 3️⃣ COMPROBANTE -------------------------------------------------
             if fase == "esperando_comprobante":
