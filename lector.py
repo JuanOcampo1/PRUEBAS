@@ -179,117 +179,66 @@ def descargar_imagen_lengueta():
 
 CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
 
-import os
-import io
-import logging
-from googleapiclient.http import MediaIoBaseDownload
-
 def descargar_audios_bienvenida_drive():
     """
-    Descarga audios desde las subcarpetas 'BIENVENIDA' y 'CONFIANZA' dentro de la carpeta 'Audios' en Google Drive.
-    Guarda los archivos en:
-    - /var/data/audios/bienvenida/
-    - /var/data/audios/confianza/
+    Descarga audios desde la subcarpeta 'BIENVENIDA' dentro de la carpeta 'Audios' en Google Drive.
+    Guarda los archivos en: /var/data/audios/bienvenida/
     """
     try:
         print(">>> descargar_audios_bienvenida_drive() – iniciando")
         service = get_drive_service()
-
-        # Rutas de destino locales
-        carpeta_bienvenida = "/var/data/audios/bienvenida"
-        carpeta_confianza = "/var/data/audios/confianza"
-        os.makedirs(carpeta_bienvenida, exist_ok=True)
-        os.makedirs(carpeta_confianza, exist_ok=True)
+        os.makedirs("/var/data/audios/bienvenida", exist_ok=True)
 
         logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
-
-        # 🧹 Limpiar bienvenida
-        for f in os.listdir(carpeta_bienvenida):
-            archivo = os.path.join(carpeta_bienvenida, f)
-            if os.path.isfile(archivo):
-                os.remove(archivo)
-                logging.info(f"🧹 Eliminado archivo viejo: {archivo}")
+        logging.info(f"🆔 Carpeta raíz: {CARPETA_AUDIOS_DRIVE}")
 
         # Buscar subcarpeta 'BIENVENIDA'
-        bienvenida = service.files().list(
+        subfolder = service.files().list(
             q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
+            fields="files(id, name)",
+            pageSize=1
         ).execute().get("files", [])
 
-        if bienvenida:
-            bienvenida_id = bienvenida[0]["id"]
-
-            audios = service.files().list(
-                q=f"'{bienvenida_id}' in parents and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
-            ).execute().get("files", [])
-
-            for audio in audios:
-                nombre_archivo = audio["name"]
-                ruta_destino = os.path.join(carpeta_bienvenida, nombre_archivo)
-                logging.info(f"⬇️ Descargando audio bienvenida: {nombre_archivo}")
-
-                request = service.files().get_media(fileId=audio["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
-
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-
-                with open(ruta_destino, "wb") as f:
-                    f.write(buffer.getvalue())
-                logging.info(f"✅ Guardado: {ruta_destino}")
-
-        else:
+        if not subfolder:
             logging.warning("❌ No se encontró la subcarpeta 'BIENVENIDA'.")
+            return
 
-        # ────────────────────────────────────────────────
-        # AHORA: Descargar "Desconfianza.mp3" de carpeta 'CONFIANZA'
-        logging.info("📂 [Audio Confianza] Buscando en carpeta 'CONFIANZA'…")
+        subfolder_id = subfolder[0]["id"]
 
-        confianza = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONFIANZA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
+        # Buscar archivos de audio en la subcarpeta
+        audios = service.files().list(
+            q=f"'{subfolder_id}' in parents and mimeType contains 'audio/' and trashed = false",
+            fields="files(id, name)"
         ).execute().get("files", [])
 
-        if confianza:
-            confianza_id = confianza[0]["id"]
+        for audio in audios:
+            nombre_archivo = audio["name"]
+            ruta_destino = os.path.join("/var/data/audios/bienvenida", nombre_archivo)
 
-            desconfianza = service.files().list(
-                q=f"'{confianza_id}' in parents and name = 'Desconfianza.mp3' and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)", pageSize=1
-            ).execute().get("files", [])
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre_archivo} — omitiendo descarga.")
+                continue
 
-            if desconfianza:
-                file = desconfianza[0]
-                nombre_archivo = file["name"]
-                ruta_destino = os.path.join(carpeta_confianza, nombre_archivo)
+            logging.info(f"⬇️ Descargando audio: {nombre_archivo}")
+            request = service.files().get_media(fileId=audio["id"])
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
 
-                request = service.files().get_media(fileId=file["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
 
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
 
-                with open(ruta_destino, "wb") as f:
-                    f.write(buffer.getvalue())
-                logging.info(f"✅ Guardado: {ruta_destino}")
-            else:
-                logging.warning("❌ No se encontró el audio 'Desconfianza.mp3' en la carpeta CONFIANZA.")
+            logging.info(f"✅ Guardado: {ruta_destino}")
 
-        else:
-            logging.warning("❌ No se encontró la subcarpeta 'CONFIANZA'.")
-
+        logging.info("🎧 Audios de bienvenida descargados con éxito.")
         print(">>> descargar_audios_bienvenida_drive() – finalizado")
 
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
-        logging.error(f"❌ Error al descargar audios: {e}")
-
-
+        logging.error(f"❌ Error al descargar audios de bienvenida: {e}")
 
 # ─── Descarga del video de confianza desde Drive ─────────────────────────────
 CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
@@ -874,14 +823,14 @@ def menciona_catalogo(texto: str) -> bool:
         "catalogo", "catálogo", "ver catálogo", "mostrar catálogo",
         "quiero ver", "ver productos", "mostrar productos",
         "ver lo que tienes", "ver tenis", "muéstrame",
-        "mostrar lo que tienes", "que estilos tiene",
+        "mostrar lo que tienes", "tenis disponibles",
         "enséñame el catálogo", "Tienes imagenes", "mandame el catalogo",
         "quiero ver modelos", "ver referencias", "quiero referencias",
         "muestrame los modelos", "qué modelos tienes", "que modelos hay",
         "que tienes", "mandame fotos", "mandame las imagenes",
         "envíame modelos", "quiero ver imágenes", "tenis que tienes",
         "que hay", "quiero ver los pares", "muestra los tenis",
-        "cuales modelos tienes", "mande fotos"
+        "cuales modelos tienes", "que pares hay"
     ]
 
     # Variantes mal escritas
@@ -935,7 +884,6 @@ async def enviar_welcome_venom(cid: str):
 
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
-            b64_final = f"data:audio/mpeg;base64,{b64}"  # ✅ encabezado MIME agregado
 
         logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
         logging.info(f"🧪 Base64 preview: {b64[:80]}...")
@@ -945,8 +893,8 @@ async def enviar_welcome_venom(cid: str):
             "messages": [
                 {
                     "type": "audio",
-                    "base64": b64_final,  # ✅ ahora con encabezado
-                    "mimetype": "audio/mpeg",  # WhatsApp lo requiere así
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",  # 👈 WhatsApp lo requiere así
                     "filename": "bienvenida1.mp3",
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
@@ -972,7 +920,6 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
         }
-
 
 
 
@@ -1309,6 +1256,9 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     return False
 
+def decodificar_imagen_base64(base64_str: str) -> Image.Image:
+    data = base64.b64decode(base64_str + "===")
+    return Image.open(io.BytesIO(data)).convert("RGB")
 
 # 🧠 Cargar base de embeddings guardados
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
@@ -1905,47 +1855,33 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if any(frase in texto_normalizado for frase in frases_desconfianza):
         video_path = "/var/data/videos/video_confianza.mp4"
-        audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
 
-        mensajes = [
-            {
-                "type": "text",
-                "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
-                "parse_mode": "Markdown"
-            }
-        ]
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
+            parse_mode="Markdown"
+        )
 
         if os.path.exists(video_path):
             with open(video_path, "rb") as f:
-                b64_video = base64.b64encode(f.read()).decode("utf-8")
-                mensajes.append({
-                    "type": "video",
-                    "base64": b64_video,
-                    "mimetype": "video/mp4",
-                    "filename": "video_confianza.mp4",
-                    "text": "🎥 Mira este video corto de confianza:"
-                })
-        else:
-            mensajes.append({
-                "type": "text",
-                "text": "📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
-                "parse_mode": "Markdown"
-            })
+                b64 = base64.b64encode(f.read()).decode("utf-8")
 
-        if os.path.exists(audio_path):
-            with open(audio_path, "rb") as f:
-                b64_audio = base64.b64encode(f.read()).decode("utf-8")
-                mensajes.append({
-                    "type": "audio",
-                    "base64": b64_audio,
-                    "mimetype": "audio/mpeg",
-                    "filename": "Desconfianza.mp3",
-                    "text": "🎧 Escucha este audio breve también:"
-                })
+            return {
+                "type": "video",
+                "base64": b64,
+                "mimetype": "video/mp4",
+                "filename": "video_confianza.mp4",
+                "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria."
+            }
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
+                parse_mode="Markdown"
+            )
 
         await reanudar_fase_actual(cid, ctx, est)
-        return {"type": "multi", "messages": mensajes}
-
+        return
 
 
     # 🟨 Detección universal de color — funciona en cualquier fase
@@ -3452,6 +3388,28 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+
+    # 🔒 Video de confianza si desconfía
+    if any(frase in txt for frase in (
+        "no me fio", "no confio", "es seguro", "como se que no me roban",
+        "como se que no me estafan", "desconfio", "no creo", "estafa", "miedo a comprar"
+    )):
+        VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"
+        video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
+
+        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
+        await ctx.bot.send_video(
+            chat_id=cid,
+            video=video_url,
+            caption=(
+                "🔒 Entendemos perfectamente tu preocupación. "
+                "Aquí te dejamos un video corto donde nuestros clientes reales comparten su experiencia. "
+                "Somos una empresa seria y segura, ¡puedes confiar en nosotros! 😊👍"
+            )
+        )
+        return
+
+
     if await manejar_catalogo(update, ctx):
         return
 
@@ -3925,27 +3883,15 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 if f.lower().endswith(".mp4") and "confianza" not in f.lower()
             ])
 
-            # 3. Diccionario de nombres personalizados con emojis
-            nombres_con_emojis = {
-                "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
-                "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
-                "Descuentos.mp4":   "👟 Referencias 🔝 🔥 Promo 39 % Off 🔥",
-                "Infantil.mp4":     "👟 Referencias 🔝 🔥 Niños 🔥"
-            }
-
             videos = []
             for nombre in archivos:
                 path = os.path.join(carpeta, nombre)
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
-                    texto = nombres_con_emojis.get(
-                        nombre,
-                        f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
-                    )
                     videos.append({
                         "type": "video",
                         "base64": f"data:video/mp4;base64,{b64}",
-                        "text": texto
+                        "text": f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
                     })
 
             if videos:
@@ -3969,7 +3915,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
 
-
     # 🔊 Petición de audio
     if any(f in txt for f in (
         "mandame un audio", "mándame un audio", "envíame un audio",
@@ -3983,31 +3928,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         )
 
         try:
-            # 1️⃣ Generar el MP3 con OpenAI TTS
             ruta_audio = await generar_audio_openai(texto_respuesta, f"audio_{cid}.mp3")
-            if not ruta_audio or not os.path.exists(ruta_audio):
-                raise FileNotFoundError("El TTS no generó el archivo")
+            ruta_completa = os.path.join("temp", f"audio_{cid}.mp3")
 
-            # 2️⃣ Convertir a base64 para enviarlo por Venom / WhatsApp
-            with open(ruta_audio, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
-
-            # 3️⃣ Devolver estructura que Venom entiende
-            return {
-                "type": "audio",
-                "base64": b64,            # ← base64 limpio
-                "mimetype": "audio/mpeg", # ← obligatorio
-                "filename": os.path.basename(ruta_audio),
-                "text": "🎧 Aquí tienes tu audio:"
-            }
+            if ruta_audio and os.path.exists(ruta_completa):
+                return {
+                    "type": "audio",
+                    "path": ruta_completa,
+                    "text": "🎧 Aquí tienes tu audio:"
+                }
+            else:
+                return {
+                    "type": "text",
+                    "text": "❌ No pude generar el audio en este momento."
+                }
 
         except Exception as e:
-            logging.error(f"❌ Error generando o codificando audio: {e}")
+            logging.error(f"❌ Error generando o accediendo al audio: {e}")
             return {
                 "type": "text",
-                "text": "❌ No pude generar el audio en este momento."
+                "text": "❌ Ocurrió un problema generando el audio."
             }
-
 
     # ─── MAIN try/except ───
     try:
@@ -4072,64 +4013,17 @@ async def venom_webhook(req: Request):
         # 🖼️ IMAGEN
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                logging.info("🖼️ [IMG] Recibida imagen, iniciando decodificación…")
-
-                # 0️⃣ Validar longitud del body
-                if not body or len(body) < 200:
-                    logging.error("❌ [IMG] Body vacío o demasiado corto para ser válido.")
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "❌ La imagen llegó incompleta. Intenta enviarla otra vez."
-                    })
-
-                # 1️⃣ Extraer base64 sin encabezado MIME
-                if body.startswith("data:image") and "," in body:
-                    header, b64_data = body.split(",", 1)
-                    logging.debug(f"🖼️ [IMG] Encabezado MIME detectado: {header[:40]}…")
-                else:
-                    b64_data = body
-                    logging.debug("🖼️ [IMG] Sin encabezado MIME.")
-
-                logging.debug(f"🖼️ [IMG] Longitud base64: {len(b64_data):,} caracteres")
-
-                # 2️⃣ Decodificar base64
-                try:
-                    img_bytes = base64.b64decode(b64_data + "===")
-                except Exception as e:
-                    logging.error(f"❌ [IMG] Error base64: {e}")
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "❌ La imagen llegó corrupta. Intenta enviarla de nuevo."
-                    })
-
-                logging.debug(f"🖼️ [IMG] Bytes decodificados: {len(img_bytes):,}")
-
-                # 3️⃣ Cargar con PIL de forma segura
-                try:
-                    with io.BytesIO(img_bytes) as img_io:
-                        img = Image.open(img_io)
-                        img.load()  # ← esto fuerza carga y detecta errores temprano
-                        img = img.convert("RGB")
-                    logging.info(
-                        f"✅ Imagen decodificada — Formato:{img.format}  Tamaño:{img.size}  Modo:{img.mode}"
-                    )
-                except Exception as e:
-                    logging.error(f"❌ [IMG] No pude leer la imagen: {e}")
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "❌ No pude leer la imagen 😕. Prueba con otra foto."
-                    })
-
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                img_bytes = base64.b64decode(b64_str + "===")
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
             except Exception as e:
-                logging.exception("❌ [IMG] Error inesperado al procesar imagen")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "⚠️ Ocurrió un error inesperado al analizar tu imagen."
-                })
+                logging.error(f"❌ No pude leer la imagen: {e}")
+                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-
-            # ─── A partir de aquí sigue tu lógica normal (fase, OCR, CLIP, etc.) ───
-
+            est = estado_usuario.get(cid, {})
+            fase = est.get("fase", "")
+            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
             # 3️⃣ COMPROBANTE -------------------------------------------------
             if fase == "esperando_comprobante":
@@ -4300,11 +4194,13 @@ async def venom_webhook(req: Request):
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: *{precio_str}* y hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
                         })
+
                     else:
                         reset_estado(cid)
                         return JSONResponse({
@@ -4321,7 +4217,6 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
-
 
 
         # 💬 TEXTO
