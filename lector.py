@@ -2089,18 +2089,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
     # ──────────────────────────────────────────────────────
-    if re.search(r"(me pagan|me consignan|me depositan)( el)? \d{1,2}", txt):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
+    if re.search(r"(me\s+pagan|me\s+consignan|me\s+depositan)(\s+el)?\s+\d{1,2}", txt, re.IGNORECASE):
+        ctx.resp.append({
+            "type": "text",
+            "text": (
                 "🗓️ ¡Perfecto! Te contactaremos ese día para ayudarte a cerrar la compra.\n\n"
                 "Para dejarte agendado, por favor mándame estos datos:\n\n"
                 "• 🧑‍💼 *Tu nombre completo*\n"
                 "• 👟 *Producto que te interesa*\n"
                 "• 🕒 *¿Qué día y a qué hora te contactamos?*"
             ),
-            parse_mode="Markdown"
-        )
+            "parse_mode": "Markdown"
+        })
         est["fase"] = "esperando_datos_pago_posterior"
         estado_usuario[cid] = est
         return
@@ -2110,64 +2110,70 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ──────────────────────────────────────────────────────
     if est.get("fase") == "esperando_datos_pago_posterior":
         try:
-            texto_limpio = txt.replace("\n", " ").strip()
+            texto_limpio = txt_raw.replace("\n", " ").strip()
 
-            # Extraer modelo (número de 3 o 4 cifras)
-            modelo = re.search(r"\b\d{3,4}\b", texto_limpio)
-            modelo = modelo.group(0) if modelo else ""
+            # 1️⃣ Modelo: primer número de 3-4 cifras
+            modelo_match = re.search(r"\b\d{3,4}\b", texto_limpio)
+            modelo = modelo_match.group(0) if modelo_match else ""
 
-            # Extraer nombre: lo que va antes del modelo
-            nombre = texto_limpio.split(modelo)[0].strip() if modelo else texto_limpio[:25].strip()
+            # 2️⃣ Nombre: todo lo que va antes del modelo
+            nombre = texto_limpio.split(modelo)[0].strip() if modelo else ""
 
-            # Extraer día/hora desde la palabra clave
-            dia_hora = ""
-            match_dia = re.search(r"(mañana|hoy|el\s+dia\s+\d+|el\s+\d+|día\s+\d+|a\s+las\s+\d+)", texto_limpio, re.IGNORECASE)
-            if match_dia:
-                dia_hora = texto_limpio[match_dia.start():].strip()
+            # 3️⃣ Día/hora: desde cualquier mención de fecha u hora en adelante
+            dia_hora_match = re.search(
+                r"(mañana|hoy|el\s+\d{1,2}\b|día\s+\d{1,2}\b|a\s+las\s+\d{1,2}(?:[:h]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)",
+                texto_limpio, re.IGNORECASE
+            )
+            dia_hora = texto_limpio[dia_hora_match.start():].strip() if dia_hora_match else ""
 
             if nombre and modelo and dia_hora:
                 datos_pendiente = {
-                    "Cliente": nombre.title(),
+                    "Cliente":  nombre.title(),
                     "Teléfono": cid,
                     "Producto": modelo,
-                    "Pago": dia_hora
+                    "Pago":     dia_hora
                 }
 
                 ok = registrar_orden_unificada(datos_pendiente, destino="PENDIENTES")
 
                 if ok:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
-                    )
-                    est["fase"] = "inicial"
+                    ctx.resp.append({
+                        "type": "text",
+                        "text": (
+                            f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} "
+                            f"para cerrar la compra del modelo {modelo.upper()} 🔥"
+                        )
+                    })
+                    est["fase"] = "pausado_promesa"
+                    est["pausa_hasta"] = (datetime.now() + timedelta(hours=48)).isoformat()
                     estado_usuario[cid] = est
                 else:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="⚠️ No pudimos registrar tu promesa de pago. Intenta nuevamente."
-                    )
+                    ctx.resp.append({
+                        "type": "text",
+                        "text": "⚠️ No pudimos registrar tu promesa de pago. Intenta nuevamente."
+                    })
                 return
 
-            else:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        "❌ Para agendar tu pago necesito 3 cosas:\n"
-                        "1️⃣ Tu *nombre*\n2️⃣ El *modelo* que te gustó\n3️⃣ *Día y hora* estimada de pago\n\n"
-                        "Ejemplo:\nJuan\nDS 298\nMañana a las 2"
-                    ),
-                    parse_mode="Markdown"
-                )
-                return
+            # ——— Datos incompletos ———
+            ctx.resp.append({
+                "type": "text",
+                "text": (
+                    "❌ Para agendar tu pago necesito 3 cosas:\n"
+                    "1️⃣ Tu *nombre*\n2️⃣ El *modelo* que te gustó\n3️⃣ *Día y hora* estimada para contactarte\n\n"
+                    "Ejemplo:\nJuan Pablo\nDS 298\nEl 30 a las 2 PM"
+                ),
+                "parse_mode": "Markdown"
+            })
+            return
 
         except Exception as e:
             logging.error(f"[PENDIENTES] ❌ Error registrando pago posterior: {e}")
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
-            )
+            ctx.resp.append({
+                "type": "text",
+                "text": "⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
+            })
             return
+
 
 
     # ─────────────────────────────────────────────
