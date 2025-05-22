@@ -3178,26 +3178,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return   # ← nada más se procesa en esta vuelta
 
 
-        # ────────────────────────────────────────────────
-        # ⏸️  PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
-        # ────────────────────────────────────────────────
-        if est.get("pausa_hasta"):
-            pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
-            if datetime.now() < pausa_hasta:
-                logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
-
-                # Sólo se permiten imágenes si estuviera esperando otra cosa.
-                if est.get("fase") == "pausado_addi" and mtype.startswith("image"):
-                    pass  # aquí podrías analizarlas si lo deseas
-                else:
-                    return {"status": "paused"}      # 🔇 silencio total
-            else:
-                # La pausa expiró → reiniciamos el flujo
-                est.pop("pausa_hasta", None)
-                if est.get("fase", "").startswith("pausado_"):
-                    est["fase"] = "inicial"
-                estado_usuario[cid] = est
-
+    # ────────────────────────────────────────────────────────────────
+    # ⏸️  PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
+    # ────────────────────────────────────────────────────────────────
+    if est.get("pausa_hasta"):
+        pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
+        if datetime.now() < pausa_hasta:
+            logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
+            return {
+                "type": "text",
+                "text": "⏸️ Un asesor está procesando tu solicitud. Te contactarán pronto."
+            }
+        else:
+            # La pausa expiró → reiniciamos el flujo
+            est.pop("pausa_hasta", None)
+            if est.get("fase", "").startswith("pausado_"):
+                est["fase"] = "inicial"
+            estado_usuario[cid] = est
 
     # ────────────────────────────────────────────────────────────────
     # 📋 DATOS PARA ADDI – VERSIÓN TOLERANTE
@@ -3205,7 +3202,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_datos_addi":
         try:
             # 1. Separa en líneas no vacías
-            partes = [p.strip() for p in body.splitlines() if p.strip()]
+            partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
 
             # 2. Necesitamos exactamente 4 líneas con algún contenido
             if len(partes) < 4:
@@ -3238,7 +3235,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         "Enseguida me comunico para seguir el proceso. 💙"
                     )
                 )
-                est["fase"]        = "pausado_addi"
+                est["fase"] = "pausado_addi"
                 est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
                 estado_usuario[cid] = est
             else:
@@ -3255,6 +3252,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
             )
             return
+
 
 
 
