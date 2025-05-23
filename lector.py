@@ -3949,10 +3949,10 @@ async def manejar_catalogo(update, ctx):
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid     = str(cid)
-    texto   = body.lower() if body else ""
-    txt     = texto                  # ✅ Garantiza que txt esté disponible globalmente
-    txt_raw = body or ""
+    cid = str(cid)
+    texto = body.lower() if body else ""
+    txt = texto if texto else ""
+
 
     # 🧠 Inicializa estado si no existe  ←  <<— NUEVA POSICIÓN
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
