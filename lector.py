@@ -3949,9 +3949,10 @@ async def manejar_catalogo(update, ctx):
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid = str(cid)
-    texto = body.lower() if body else ""
-    txt = texto if texto else ""
+    cid   = str(cid)
+    texto = (body or "").lower()   # 1) siempre existe
+    txt   = texto                  # 2) alias que muchos bloques ya usan
+    globals()["texto"] = texto     # 3) si algún bloque viejo menciona `texto`, ya lo tiene
 
 
     # 🧠 Inicializa estado si no existe  ←  <<— NUEVA POSICIÓN
