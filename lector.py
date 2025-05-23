@@ -4137,7 +4137,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
-            "esperando_nombre": True  # 🆕 Flag de bienvenida
+            "esperando_nombre": True        # 🆕 Flag de bienvenida (solo se usa una vez)
         }
 
     est = estado_usuario.get(cid, {})
@@ -4152,27 +4152,29 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         if match_ciudad:
             est["ciudad"] = match_ciudad.group(2).strip().title()
 
+        # ▶️ Si obtuvo al menos nombre o ciudad, responde y deja de esperar
         if "nombre" in est or "ciudad" in est:
-            # ✅ Guardar y responder — sin riesgo de None
             est["esperando_nombre"] = False
             estado_usuario[cid] = est
 
-            ciudad = est.get("ciudad")          # puede ser None
+            nombre  = est.get("nombre", "amig@")
+            ciudad  = est.get("ciudad")
             ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
 
             return {
                 "type": "text",
                 "text": (
-                    f"👋 Hola {est.get('nombre', 'amig@')}! "
+                    f"👋 Hola {nombre}! "
                     f"{ciudad_texto}"
                     "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
                 ),
                 "parse_mode": "Markdown"
             }
 
-        # ⚠️ El usuario ignoró la pregunta — permite continuar flujo
+        # ▶️ Usuario ignoró la pregunta. Deja de esperar y continúa flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
+
 
 
 
@@ -4869,7 +4871,7 @@ async def venom_webhook(req: Request):
         # 🤷 TIPO NO MANEJADO
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
-            return JSONResponse({"type": "text", "text": f"⚠️ Tipo no manejado: {mtype}"})
+            return JSONResponse({"type": "text", "text": f"⚠️Disculpe que pena pero no manejamos enviame una foto del zapato que deseas: {mtype}"})
 
     except Exception:
         logging.exception("🔥 Error general en venom_webhook")
