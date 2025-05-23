@@ -2768,6 +2768,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # 👟 Evitar repetir análisis de talla si ya tenemos la talla definida
+    if est.get("fase") == "esperando_talla" and est.get("talla"):
+        est["fase"] = "confirmar_datos_guardados"
+
     # 👟 Elegir talla (funciona igual que imagen_detectada: confirma y pide lengüeta)
     if est.get("fase") == "esperando_talla":
         tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
