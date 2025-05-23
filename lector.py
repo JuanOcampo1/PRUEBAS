@@ -2242,27 +2242,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 
-    # ─────────── Preguntas frecuentes (FAQ) ───────────
-    if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
-        texto_normalizado = normalize(txt_raw)
 
-        # FAQ 1: ¿Cuánto demora el envío?
-        if any(frase in texto_normalizado for frase in (
-                     "cuanto demora", "cuanto tarda", "cuanto se demora",
-                     "en cuanto llega", "me llega rapido", "llegan rapido"
-        )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
-                    "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
-                    "En ese caso aplica *pago anticipado* (no contra entrega)."
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
 
         # FAQ 2: ¿Tienen pago contra entrega?
         if any(frase in texto_normalizado for frase in (
@@ -4098,7 +4078,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "text": "❌ No pude generar el audio en este momento."
             }
 
+    # ─────────── Preguntas frecuentes (FAQ) ───────────
+    if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+        texto_normalizado = normalize(txt_raw)
 
+        # FAQ 1: ¿Cuánto demora el envío?
+        if any(frase in texto_normalizado for frase in (
+                     "cuanto demora", "cuanto tarda", "cuanto se demora",
+                     "en cuanto llega", "me llega rapido", "llegan rapido"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🚚 El tiempo de entrega depende de la ciudad de destino, "
+                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
+                    "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
+                    "En ese caso aplica *pago anticipado* (no contra entrega)."
+                ),
+                parse_mode="Markdown"
+            )
+            await reanudar_fase_actual(cid, ctx, est)
+            return
     # ─── MAIN try/except ───
     try:
         reply = await responder(dummy_update, ctx)
