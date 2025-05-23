@@ -2511,22 +2511,72 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 👟 Elegir talla (texto directo o confirmación de lengüeta)
+    # 👟 Elegir talla (funciona igual que imagen_detectada: confirma y pide lengüeta)
     if est.get("fase") == "esperando_talla":
-        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-        if isinstance(tallas, (int, float, str)):
-            tallas = [str(tallas)]
+        tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
+        if isinstance(tallas_disponibles, (int, float, str)):
+            tallas_disponibles = [str(tallas_disponibles)]
 
-        # 🟢 1. Si ya hay una talla detectada (por imagen) y cliente confirma con "sí"
-        if est.get("talla") and any(p in txt for p in ("sí", "si", "s", "dale", "claro", "continuar", "comprar", "vamos")):
-            talla_detectada = est["talla"]
+        # Normalización y coincidencia difusa
+        tallas_normalizadas = {normalize(t): t for t in tallas_disponibles}
+        entrada_normalizada = normalize(txt)
 
-        # 🟡 2. Si escribió la talla manualmente
-        else:
-            talla_detectada = detectar_talla(txt_raw, tallas)
+        coincidencias = difflib.get_close_matches(entrada_normalizada, tallas_normalizadas.keys(), n=1, cutoff=0.6)
 
-        if talla_detectada:
+        if coincidencias:
+            talla_detectada = tallas_normalizadas[coincidencias[0]]
             est["talla"] = talla_detectada
+            est["fase"] = "esperando_talla"
+            estado_usuario[cid] = est
+
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"✅ ¡Claro que tenemos talla {talla_detectada}! "
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                "del zapato que usas normalmente 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
+                }
+            else:
+                return {
+                    "type": "text",
+                    "text": (
+                        f"✅ ¡Claro que tenemos talla {talla_detectada}! "
+                        "📸 Por favor mándame una foto de la lengüeta de tu zapato para asegurarnos de la talla correcta 👟."
+                    ),
+                    "parse_mode": "Markdown"
+                }
+
+        # ❌ No entendió ninguna talla, mostrar disponibles
+        tallas_str = "\n".join(f"- {t}" for t in tallas_disponibles)
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "⚠️ No entendí qué talla necesitas.\n\n"
+                f"👉 Las tallas disponibles para el modelo *{est.get('modelo')}* color *{est.get('color')}* son:\n\n"
+                f"{tallas_str}\n\n"
+                "¿Cuál deseas?"
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
 
         # 🔍 Ver si ya hay memoria del cliente
         cliente = obtener_datos_cliente(numero)
@@ -3709,7 +3759,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
-    
+
+    # 🚚 ¿Cuánto cuesta el envío a...? (universal, responde solo si se menciona "envío")
+    if "envio" in texto:
+        envio_match = re.search(
+            r"(cu[aá]nto(?: cuesta| vale| cobran)?(?: el)? env[ií]o(?: a)?\s*([a-záéíóúñ\s]+)?)",
+            texto
+        )
+        if envio_match:
+            ciudad = envio_match.group(2).strip().title() if envio_match.group(2) else "tu ciudad"
+            return {
+                "type": "text",
+                "text": f"🚚 El envío a *{ciudad}* es totalmente gratuito, no tiene costo. 📦",
+                "parse_mode": "Markdown"
+            }
+
+
     # Lista de palabras afirmativas comunes
     AFIRMATIVAS = [
         "si", "sí", "sii", "sis", "sisz", "siss", "de una", "dale", "hágale", "hagale", 
