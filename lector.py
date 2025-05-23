@@ -186,31 +186,33 @@ from googleapiclient.http import MediaIoBaseDownload
 
 def descargar_audios_bienvenida_drive():
     """
-    Descarga audios desde las subcarpetas 'BIENVENIDA' y 'CONFIANZA' dentro de la carpeta 'Audios' en Google Drive.
+    Descarga audios desde las subcarpetas 'BIENVENIDA', 'CONFIANZA' y 'CONTRAENTREGA'
+    dentro de la carpeta 'Audios' en Google Drive.
     Guarda los archivos en:
     - /var/data/audios/bienvenida/
     - /var/data/audios/confianza/
+    - /var/data/audios/contraentrega/
     """
     try:
         print(">>> descargar_audios_bienvenida_drive() – iniciando")
         service = get_drive_service()
 
         # Rutas de destino locales
-        carpeta_bienvenida = "/var/data/audios/bienvenida"
-        carpeta_confianza = "/var/data/audios/confianza"
+        carpeta_bienvenida     = "/var/data/audios/bienvenida"
+        carpeta_confianza      = "/var/data/audios/confianza"
+        carpeta_contraentrega  = "/var/data/audios/contraentrega"
         os.makedirs(carpeta_bienvenida, exist_ok=True)
         os.makedirs(carpeta_confianza, exist_ok=True)
-
-        logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
+        os.makedirs(carpeta_contraentrega, exist_ok=True)
 
         # 🧹 Limpiar bienvenida
         for f in os.listdir(carpeta_bienvenida):
             archivo = os.path.join(carpeta_bienvenida, f)
             if os.path.isfile(archivo):
                 os.remove(archivo)
-                logging.info(f"🧹 Eliminado archivo viejo: {archivo}")
 
-        # Buscar subcarpeta 'BIENVENIDA'
+        logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
+
         bienvenida = service.files().list(
             q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
             fields="files(id, name)", pageSize=1
@@ -218,34 +220,27 @@ def descargar_audios_bienvenida_drive():
 
         if bienvenida:
             bienvenida_id = bienvenida[0]["id"]
-
             audios = service.files().list(
                 q=f"'{bienvenida_id}' in parents and mimeType contains 'audio/' and trashed = false",
                 fields="files(id, name)"
             ).execute().get("files", [])
 
             for audio in audios:
-                nombre_archivo = audio["name"]
-                ruta_destino = os.path.join(carpeta_bienvenida, nombre_archivo)
-                logging.info(f"⬇️ Descargando audio bienvenida: {nombre_archivo}")
-
+                nombre = audio["name"]
+                destino = os.path.join(carpeta_bienvenida, nombre)
                 request = service.files().get_media(fileId=audio["id"])
                 buffer = io.BytesIO()
                 downloader = MediaIoBaseDownload(buffer, request)
-
                 done = False
                 while not done:
                     _, done = downloader.next_chunk()
-
-                with open(ruta_destino, "wb") as f:
+                with open(destino, "wb") as f:
                     f.write(buffer.getvalue())
-                logging.info(f"✅ Guardado: {ruta_destino}")
-
+                logging.info(f"✅ Guardado: {destino}")
         else:
             logging.warning("❌ No se encontró la subcarpeta 'BIENVENIDA'.")
 
-        # ────────────────────────────────────────────────
-        # AHORA: Descargar "Desconfianza.mp3" de carpeta 'CONFIANZA'
+        # ─── CONFIANZA ───
         logging.info("📂 [Audio Confianza] Buscando en carpeta 'CONFIANZA'…")
 
         confianza = service.files().list(
@@ -255,39 +250,66 @@ def descargar_audios_bienvenida_drive():
 
         if confianza:
             confianza_id = confianza[0]["id"]
-
-            desconfianza = service.files().list(
+            archivo = service.files().list(
                 q=f"'{confianza_id}' in parents and name = 'Desconfianza.mp3' and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)", pageSize=1
+                fields="files(id, name)"
             ).execute().get("files", [])
 
-            if desconfianza:
-                file = desconfianza[0]
-                nombre_archivo = file["name"]
-                ruta_destino = os.path.join(carpeta_confianza, nombre_archivo)
-
-                request = service.files().get_media(fileId=file["id"])
+            if archivo:
+                nombre = archivo[0]["name"]
+                destino = os.path.join(carpeta_confianza, nombre)
+                request = service.files().get_media(fileId=archivo[0]["id"])
                 buffer = io.BytesIO()
                 downloader = MediaIoBaseDownload(buffer, request)
-
                 done = False
                 while not done:
                     _, done = downloader.next_chunk()
-
-                with open(ruta_destino, "wb") as f:
+                with open(destino, "wb") as f:
                     f.write(buffer.getvalue())
-                logging.info(f"✅ Guardado: {ruta_destino}")
+                logging.info(f"✅ Guardado: {destino}")
             else:
-                logging.warning("❌ No se encontró el audio 'Desconfianza.mp3' en la carpeta CONFIANZA.")
-
+                logging.warning("❌ No se encontró 'Desconfianza.mp3' en CONFIANZA.")
         else:
-            logging.warning("❌ No se encontró la subcarpeta 'CONFIANZA'.")
+            logging.warning("❌ No se encontró la carpeta 'CONFIANZA'.")
+
+        # ─── CONTRAENTREGA ───
+        logging.info("📂 [Audio Contraentrega] Buscando en carpeta 'CONTRAENTREGA'…")
+
+        contraentrega = service.files().list(
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONTRAENTREGA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)", pageSize=1
+        ).execute().get("files", [])
+
+        if contraentrega:
+            carpeta_id = contraentrega[0]["id"]
+            archivo = service.files().list(
+                q=f"'{carpeta_id}' in parents and name = 'CONTRAENTREGA.mp3' and mimeType contains 'audio/' and trashed = false",
+                fields="files(id, name)"
+            ).execute().get("files", [])
+
+            if archivo:
+                nombre = archivo[0]["name"]
+                destino = os.path.join(carpeta_contraentrega, nombre)
+                request = service.files().get_media(fileId=archivo[0]["id"])
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                with open(destino, "wb") as f:
+                    f.write(buffer.getvalue())
+                logging.info(f"✅ Guardado: {destino}")
+            else:
+                logging.warning("❌ No se encontró 'CONTRAENTREGA.mp3' en CONTRAENTREGA.")
+        else:
+            logging.warning("❌ No se encontró la carpeta 'CONTRAENTREGA'.")
 
         print(">>> descargar_audios_bienvenida_drive() – finalizado")
 
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
         logging.error(f"❌ Error al descargar audios: {e}")
+
 
 
 
@@ -990,11 +1012,6 @@ async def enviar_welcome_venom(cid: str):
 
 
 CATALOG_LINK = "https://wa.me/c/573007607245"
-CATALOG_MESSAGE = (
-    f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
-    f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
-
-)
 
 def fase_valida(fase: str) -> bool:
     fases_validas = [
@@ -1876,19 +1893,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ]
 
         if not coincidencias:
-            await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.")
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.") 
             return
 
         modelos_enviados = []
         for archivo in coincidencias:
             try:
                 path = os.path.join(ruta, archivo)
-                modelo = archivo.replace(".jpg", "").replace("_", " ")
-                modelos_enviados.append(modelo)
 
-                item = next((i for i in inv if normalize(i["modelo"]) == normalize(modelo)), None)
+                modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
+                partes = modelo_raw.split()
+
+                if len(partes) >= 3:
+                    marca = partes[0]
+                    modelo = partes[1]
+                    color_archivo = " ".join(partes[2:])
+                else:
+                    marca = modelo = color_archivo = ""
+
+                modelos_enviados.append(modelo_raw)
+
+                item = next(
+                    (i for i in inv if
+                     normalize(i["modelo"]) == normalize(modelo) and
+                     normalize(i["color"]) == normalize(color_archivo) and
+                     normalize(i["marca"]) == normalize(marca)),
+                    None
+                )
                 precio = f"{int(item['precio']):,} COP" if item else "Consultar"
-                caption = f"📸 Modelo en color *{color.upper()}*: *{modelo}*\n💰 Precio: {precio}"
+
+                caption = f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n💰 Precio: {precio}"
 
                 await ctx.bot.send_photo(
                     chat_id=cid,
@@ -1898,6 +1932,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 logging.error(f"❌ Error enviando imagen: {e}")
+
+
+
 
         # 🧠 Guardar estado
         est["color"] = color
@@ -2050,14 +2087,35 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             for archivo in coincidencias:
                 path = os.path.join(ruta, archivo)
-                modelo = archivo.replace(".jpg", "").replace("_", " ")
-                modelos_enviados.append(modelo)
+
+                modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
+                partes = modelo_raw.split()
+
+                if len(partes) >= 3:
+                    marca  = partes[0]
+                    modelo = partes[1]
+                    color_archivo = " ".join(partes[2:])
+                else:
+                    marca = modelo = color_archivo = ""
+
+                modelos_enviados.append(modelo_raw)
+
+                item = next(
+                    (i for i in inv if
+                     normalize(i["modelo"]) == normalize(modelo) and
+                     normalize(i["color"]) == normalize(color_archivo)),
+                    None
+                )
+                precio = f"{int(item['precio']):,} COP" if item else "Consultar"
 
                 try:
                     await ctx.bot.send_photo(
                         chat_id=cid,
                         photo=open(path, "rb"),
-                        caption=f"📸 Modelo *{modelo}* en color *{color.upper()}*",
+                        caption=(
+                            f"📸 Modelo *{modelo_raw}* en color *{color.upper()}*\n"
+                            f"💰 Precio: {precio}"
+                        ),
                         parse_mode="Markdown"
                     )
                 except Exception as e:
@@ -2066,6 +2124,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             if errores_envio:
                 await ctx.bot.send_message(cid, f"⚠️ No pude enviar {errores_envio} de {len(coincidencias)} imágenes.")
+
 
             # Guardar estado para precio/tallas posteriores
             est["color"] = color
@@ -3364,9 +3423,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if await manejar_catalogo(update, ctx):
-        return
-
     # 🖼️ Procesar imagen subida si estaba esperando
     if est.get("fase") == "esperando_imagen" and update.message.photo:
         f = await update.message.photo[-1].get_file()
@@ -3759,6 +3815,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
+    txt_raw = body or ""
 
     # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
     if "envio" in texto:
@@ -3898,21 +3955,28 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = {"fase": "inicio"}
 
 
-    # 👤 Si el usuario dice nombre + ciudad (ej: "Mi nombre es ___ y soy de ___")
-    match = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+).*?(de|desde|en)\s+([a-zA-Záéíóúñ\s]+)", normalize(txt))
-    if match:
-        nombre = match.group(2).capitalize()
-        ciudad = match.group(4).strip().title()
-
-        est = estado_usuario.get(cid, {})
+       # 👤 Detectar nombre o ciudad en frases sueltas
+    match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
+    if match_nombre:
+        nombre = match_nombre.group(2).capitalize()
         est["nombre"] = nombre
-        est["ciudad"] = ciudad
-        estado_usuario[cid] = est
 
+    match_ciudad = re.search(r"(de|desde|en)\s+([a-zA-Záéíóúñ\s]+)", normalize(txt))
+    if match_ciudad:
+        ciudad = match_ciudad.group(2).strip().title()
+        est["ciudad"] = ciudad
+
+    if "nombre" in est or "ciudad" in est:
+        estado_usuario[cid] = est
         return {
             "type": "text",
-            "text": f"👋 Hola {nombre}, ¡qué bueno que seas de {ciudad}! 🏡\nEl envío es gratis 🚚. Cuéntame, ¿qué modelo te gustó o qué estás buscando?"
+            "text": (
+                f"👋 Hola {est.get('nombre', 'amig@')}! "
+                f"{'Qué bueno que seas de ' + est['ciudad'] if 'ciudad' in est else ''} 🏡\n"
+                "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
+            )
         }
+
 
 
     if any(p in txt for p in (
@@ -4020,7 +4084,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
-        texto_normalizado = normalize(texto)
+        texto_normalizado = normalize(txt_raw)
+
 
 
         # FAQ 1: ¿Cuánto demora el envío?
@@ -4045,17 +4110,30 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
             "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
         )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "📦 ¡Claro que sí! Tenemos *pago contra entrega*.\n\n"
-                    "Pedimos un *anticipo de $35 000* que cubre el envío. "
-                    "Ese valor se descuenta del precio total cuando recibes el pedido."
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
+            try:
+                ruta_audio = "/var/data/audios/contraentrega/CONTRAENTREGA.mp3"
+
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio CONTRAENTREGA.mp3")
+
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "CONTRAENTREGA.mp3",
+                    "text": "🎧 Aquí tienes la explicación del pago contra entrega:"
+                }
+
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio CONTRAENTREGA: {e}")
+                return {
+                    "type": "text",
+                    "text": "⚠️ No pude enviar el audio en este momento."
+                }
+
 
         # FAQ 3: ¿Tienen garantía?
         if any(frase in texto_normalizado for frase in (
