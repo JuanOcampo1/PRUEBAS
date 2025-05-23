@@ -2007,43 +2007,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🎨 El cliente menciona un color (p.e. "me gustaron los amarillos")
     if detectar_color(txt):
-        txt   = texto                              # asegura txt
+        txt   = texto
         color = detectar_color(txt)
 
-        # ── FAQs rápidas SIN romper el flujo de compra ──────────────────
-        texto_normalizado = normalize(txt)
-        faq_detectadas = {
-            "envio": (
-                "🚚 El envío tarda entre *1 a 3 días hábiles* dependiendo de tu ciudad."
-            ),
-            "pago": (
-                "💳 Aceptamos Nequi, Daviplata, Bancolombia y también contraentrega."
-            ),
-            "garantia": (
-                "✅ Todos los productos tienen *60 días de garantía* por defectos de fábrica."
-            ),
-            "tallas": (
-                "👟 Trabajamos desde la talla *34 hasta la 45* dependiendo del modelo."
-            ),
-            "original": (
-                "✅ Sí, son *originales y hechos en Colombia* 🇨🇴."
-            ),
-            "ubicacion": (
-                "📍 Estamos en *Bucaramanga*. Enviamos a todo el país."
-            ),
-            "bucaramanga": (
-                "📦 Se te puede enviar *hoy mismo* y lo puedes *recoger en la tienda* 🏬 "
-                "o te lo enviamos con un *domiciliario* y pagas al recibir 🛵💵."
-            ),
-        }
-        for clave, resp in faq_detectadas.items():
-            if clave in texto_normalizado:
-                await ctx.bot.send_message(
-                    cid,
-                    f"{resp}\n\n🧐 ¿Seguimos con los modelos color *{color.upper()}* que te gustaron?"
-                )
-                return
-        # ────────────────────────────────────────────────────────────────
+
+        # ────────────────────────────────────────────────
 
         # 📂 Buscar imágenes del color
         ruta = "/var/data/modelos_video"
@@ -2064,9 +2032,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for archivo in coincidencias:
             try:
                 path = os.path.join(ruta, archivo)
-
                 modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
-                partes = modelo_raw.split(maxsplit=2)  # marca modelo color
+                partes = modelo_raw.split(maxsplit=2)
                 if len(partes) == 3:
                     marca, modelo, color_archivo = partes
                 else:
@@ -2104,7 +2071,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         await ctx.bot.send_message(
             cid,
-            "🧐 Dime qué referencia te interesa (por ejemplo *305*) "
+            "🧐 Dime en cual estas interesado si no es ninguno enviame una foto del que quieres "
             "o envíame una imagen del modelo que deseas.",
             parse_mode="Markdown"
         )
@@ -2114,68 +2081,93 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Cliente responde después de ver las imágenes ──
     if est.get("fase") == "esperando_modelo_elegido":
         modelos = est.get("modelos_enviados", [])
-        txt     = texto  # seguridad
+        txt = texto
+        texto_normalizado = normalize(txt)
 
-        # 1️⃣  Si envió el número de referencia directamente (p.e. "305")
+        # Palabras que señalan FAQ (para no confundir con “sí”)
+        faq_palabras = {
+            "envio", "pago", "garantia", "talla", "tallas",
+            "ubicacion", "donde", "horma", "precio", "costos"
+        }
+
+        # 1️⃣  El cliente escribe número de referencia (ej. 305)
         match_ref = re.search(r"\b(\d{3})\b", txt)
         if match_ref:
             ref = match_ref.group(1)
             modelo_elegido = next((m for m in modelos if ref in m), None)
-            if modelo_elegido:
-                est["modelo"] = modelo_elegido
-                estado_usuario[cid] = est
-            else:
+            if not modelo_elegido:
                 await ctx.bot.send_message(
                     cid,
-                    "❌ No encontré ese número entre las imágenes enviadas. "
-                    "Vuelve a escribirlo o envíame la imagen del modelo."
+                    "❌ No encontré esa referencia entre las imágenes. "
+                    "Escríbela de nuevo o envíame la foto del modelo."
                 )
                 return
+            est["modelo"] = modelo_elegido
 
-        # 2️⃣  Si solo había UNA imagen y la respuesta es afirmativa genérica
-        elif len(modelos) == 1 and any(pal in txt for pal in (
-            "si", "sí", "sii", "sisas", "sisz",
-            "de una", "quiero esos", "me gustaron esos", "hágale", "De una me los llevo",
-            "me gustaron", "quiero", "esos me gustan", "quiero esos",
-            "me llevo esos", "obvio", "si son esos"
-        )):
+        # 2️⃣  Una sola imagen + afirmación genérica, sin FAQ
+        elif (
+            len(modelos) == 1
+            and any(pal in texto_normalizado for pal in (
+                "si", "sí", "sii", "sisas", "de una", "dale",
+                "hágale", "me gustaron", "quiero esos", "me llevo esos",
+                "claro", "obvio"
+            ))
+            and not any(pal in texto_normalizado for pal in faq_palabras)
+        ):
             est["modelo"] = modelos[0]
-            estado_usuario[cid] = est
 
-        # 3️⃣  Si aún no conocemos modelo elegido
-        if not est.get("modelo"):
+        # 3️⃣  Solo hay una imagen y el usuario pregunta por talla → asumirla
+        elif (
+            len(modelos) == 1
+            and re.search(r"talla\s+\d{1,2}", texto_normalizado)
+        ):
+            est["modelo"] = modelos[0]
+
+        # 4️⃣  Si aún no sabemos qué modelo eligió
+        if "modelo" not in est:
             await ctx.bot.send_message(
                 cid,
                 "❓ Dime cuál referencia te gustó (ej. *305*) o envíame la foto del modelo."
             )
             return
 
-        # 👉  Ya tenemos modelo, verificar talla en la misma frase
-        match_talla = re.search(r"talla\s+(\d{1,2})", txt)
-        if match_talla:
+        # ------------------- Manejo de talla -------------------
+        pregunta_talla = re.search(
+            r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado)
+        match_talla = re.search(r"talla\s+(\d{1,2})", texto_normalizado)
+
+        if pregunta_talla:
+            talla = pregunta_talla.group(2)
+            mensaje_inicial = (
+                f"✅ ¡Claro que tenemos talla *{talla}* para el modelo *{est['modelo']}*!\n"
+            )
+            est["talla"] = talla
+        elif match_talla:
             talla = match_talla.group(1)
             est["talla"] = talla
-            est["fase"]  = "esperando_talla"
-            estado_usuario[cid] = est
+            mensaje_inicial = (
+                f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
+            )
         else:
-            est["fase"] = "esperando_talla"
-            estado_usuario[cid] = est
+            mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
 
-        #  ↪️  Responder solicitando/lengüeta
+        # Cambiamos fase
+        est["fase"] = "esperando_talla"
+        estado_usuario[cid] = est
+
+        #  🔁  Solicitar foto de lengüeta
         ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
         if os.path.exists(ruta_ejemplo):
             with open(ruta_ejemplo, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
-
             return {
                 "type": "multi",
                 "messages": [
                     {
                         "type": "text",
                         "text": (
-                            f"✅ Perfecto, tomaremos *{est['modelo']}*"
-                            + (f" en talla *{est['talla']}*" if est.get("talla") else "")
-                            + ".\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* "
+                            mensaje_inicial +
+                            "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* "
                             "del zapato que usas normalmente 👟."
                         ),
                         "parse_mode": "Markdown"
@@ -2187,20 +2179,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     }
                 ]
             }
-        else:
-            return {
-                "type": "text",
-                "text": (
-                    f"✅ Perfecto, tomaremos *{est['modelo']}*"
-                    + (f" en talla *{est['talla']}*" if est.get("talla") else "")
-                    + ".\nEnvíame la foto de la lengüeta de tu zapato para confirmar la medida 👟."
-                ),
-                "parse_mode": "Markdown"
-            }
 
-
-
-
+        return {
+            "type": "text",
+            "text": (
+                mensaje_inicial +
+                "📸 Envíame la foto de la lengüeta de tu zapato para confirmar la medida 👟."
+            ),
+            "parse_mode": "Markdown"
+        }
 
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
@@ -4221,7 +4208,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # FAQ 12: ¿Talla más grande?
         if any(p in texto for p in (
             "talla mas grande", "talla más grande", "cual es la talla mas grande",
-            "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
+            "horma", "mayor talla", "talla maxima", "talla máxima"
         )):
             return {
                 "type": "text",
