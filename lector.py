@@ -3760,8 +3760,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     texto = body.lower() if body else ""
     txt = texto if texto else ""
 
-    # 🚚 ¿Cuánto cuesta el envío a...? (universal, responde solo si se menciona "envío")
+    # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
     if "envio" in texto:
+        # Caso 1: Cuánto cuesta el envío a...
         envio_match = re.search(
             r"(cu[aá]nto(?: cuesta| vale| cobran)?(?: el)? env[ií]o(?: a)?\s*([a-záéíóúñ\s]+)?)",
             texto
@@ -3771,6 +3772,30 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             return {
                 "type": "text",
                 "text": f"🚚 El envío a *{ciudad}* es totalmente gratuito, no tiene costo. 📦",
+                "parse_mode": "Markdown"
+            }
+
+        # Caso 2: ¿El envío es gratis?
+        if re.search(r"(env[ií]o.*(es )?gratis|es gratis.*env[ií]o|el env[ií]o tiene costo)", texto):
+            return {
+                "type": "text",
+                "text": "🚚 ¡Sí! El envío es *totalmente gratuito a cualquier ciudad de Colombia*. 📦",
+                "parse_mode": "Markdown"
+            }
+
+    # 🕒 ¿Cuánto demora en llegar a Bucaramanga? (respuesta exclusiva Bucaramanga)
+    if "bucaramanga" in texto:
+        demora_match = re.search(
+            r"(cu[aá]nto(?: tarda| demora| se demora| llega| demora en llegar| vale el envio).*(bucaramanga))",
+            texto
+        )
+        if demora_match:
+            return {
+                "type": "text",
+                "text": (
+                    "📦 Se te puede enviar *hoy mismo* y lo puedes *recoger en la tienda* 🏬 "
+                    "o te lo enviamos con un *domiciliario* y pagas al recibir 🛵💵."
+                ),
                 "parse_mode": "Markdown"
             }
 
@@ -3995,7 +4020,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
-        texto_normalizado = normalize(txt_raw)
+        texto_normalizado = normalize(texto)
+
 
         # FAQ 1: ¿Cuánto demora el envío?
         if any(frase in texto_normalizado for frase in (
