@@ -224,9 +224,6 @@ def descargar_metodos_pago_drive():
 
 CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
 
-import os
-import io
-import logging
 from googleapiclient.http import MediaIoBaseDownload
 
 def descargar_audios_bienvenida_drive():
@@ -998,10 +995,6 @@ SMTP_SERVER           = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
-
-import os
-import base64
-import logging
 
 async def enviar_welcome_venom(cid: str):
     try:
@@ -2657,10 +2650,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reset_estado(cid)
         return
 
-
-
-
-
     # 🛒 Flujo manual si está buscando modelo
     if est.get("fase") == "esperando_modelo":
         modelos = obtener_modelos_por_marca(inv, est["marca"])
@@ -3763,8 +3752,6 @@ async def reanudar_fase_actual(cid, ctx, est):
             text="✅ ¿Estos datos están correctos o deseas cambiar algo? Escribe 'sí son correctos' o dime qué deseas modificar."
         )
 
-
-
 # Función para manejar la solicitud de precio por referencia
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
 
@@ -3925,6 +3912,7 @@ async def responder_con_openai(mensaje_usuario):
     except Exception as e:
         logging.error(f"Error al consultar OpenAI: {e}")
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
+
 # 🧭 Manejo del catálogo si el usuario lo menciona
 async def manejar_catalogo(update, ctx):
     cid = getattr(update, "from", None) or getattr(update.effective_chat, "id", "")
@@ -3957,17 +3945,13 @@ async def manejar_catalogo(update, ctx):
 
     return False
 
-
-
-import base64  # Asegúrate de que esté arriba del archivo
-
 # ─────────────────────────────────────────────────────────────
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid     = str(cid)
     texto   = body.lower() if body else ""
-    txt     = texto
+    txt     = texto                  # ✅ Garantiza que txt esté disponible globalmente
     txt_raw = body or ""
 
     # 🧠 Inicializa estado si no existe  ←  <<— NUEVA POSICIÓN
@@ -3977,6 +3961,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "fase": "inicio",
             "esperando_nombre": True        # 🆕 Flag de bienvenida (solo se usa una vez)
         }
+
+    est = estado_usuario[cid]              # ✅ Siempre definido desde aquí
+
 
     est = estado_usuario[cid]              # ← existe sí o sí
     # ─── FILTRO 1: mensaje vacío ───
@@ -3999,6 +3986,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         with open(path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         return f"data:{tipo};base64,{b64}"
+
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
@@ -4259,8 +4247,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "obvio", "eso es", "ese", "de ley", "de fijo", "ok", "okay", "listo"
     ]
 
-
-
     # ───────────────────────────────────────────
     # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
@@ -4404,11 +4390,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # ▶️ Si el usuario ignoró la pregunta, continúa flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
-
-
-
-
-
 
 
     if any(p in txt for p in (
@@ -4569,7 +4550,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
             return {"type": "text", "text": "⚠️ Error inesperado. Por favor intenta más tarde."}
 
-
 @api.post("/venom")
 async def venom_webhook(req: Request):
     """Webhook principal que recibe los mensajes de Venom y procesa imagen, audio o texto."""
@@ -4709,8 +4689,6 @@ async def venom_webhook(req: Request):
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
 
-
-
             # 👟 LENGÜETA - detectar talla si está esperando_talla
             elif fase == "esperando_talla":
                 try:
@@ -4745,9 +4723,6 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
                     })
-
-
-
 
             # 🧠 CLIP - identificación de modelo
             else:
@@ -4839,9 +4814,6 @@ async def venom_webhook(req: Request):
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
 
-
-
-
         # 💬 TEXTO
         elif mtype == "chat":
                 fase_actual = estado_usuario.get(cid, {}).get("fase", "")
@@ -4897,7 +4869,7 @@ async def venom_webhook(req: Request):
         # 🤷 TIPO NO MANEJADO
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
-            return JSONResponse({"type": "text", "text": f"⚠️Disculpe que pena pero no manejamos enviame una foto del zapato que deseas: {mtype}"})
+            return JSONResponse({"type": "text", "text": f"⚠️Disculpe que pena pero no manejamos {mtype} enviame una foto del zapato que deseas: "})
 
     except Exception:
         logging.exception("🔥 Error general en venom_webhook")
