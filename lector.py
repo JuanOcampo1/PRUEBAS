@@ -1853,9 +1853,119 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"❌ Error al enviar videos tras saludo: {e}")
             await ctx.bot.send_message(cid, "❌ Hubo un error al cargar los videos.")
+  
             return
 
+    # 💬 Usuario pregunta por precios de modelos mostrados (uno o varios)
+    if est.get("modelos_enviados") and any(p in texto for p in (
+        "cuánto valen", "qué precio tienen", "cuánto cuestan", "precio de esos", "valen los",
+        "cuanto valen", "cuanto cuesta", "cuánto cuesta", "cuánto tienen de precio",
+        "valor de esos", "qué valor tienen", "dígame el precio", "dígame el valor",
+        "cual es el precio", "cual es el valor", "valor"
+    )):
+        modelos = est["modelos_enviados"]
+        respuestas = []
 
+        # 🟢 Caso: 1 solo modelo mostrado → responder precio directo
+        if len(modelos) == 1:
+            partes = modelos[0].split()
+            if len(partes) >= 3:
+                marca = partes[0]
+                modelo = partes[1]
+                color = " ".join(partes[2:])
+
+                est["marca"] = marca
+                est["modelo"] = modelo
+                est["color"] = color
+                estado_usuario[cid] = est
+
+                item = next(
+                    (i for i in inv if
+                     normalize(i["modelo"]) == normalize(modelo) and
+                     normalize(i["color"]) == normalize(color) and
+                     normalize(i["marca"]) == normalize(marca)),
+                    None
+                )
+
+                if item and item.get("precio"):
+                    precio = f"{int(item['precio']):,} COP"
+                    return {
+                        "type": "text",
+                        "text": (
+                            f"💰 El precio de los *{modelo}* color *{color}* es: *{precio}*.\n"
+                            "🚚 Recuerda que el *envío es gratis* a cualquier ciudad de Colombia."
+                        ),
+                        "parse_mode": "Markdown"
+                    }
+
+        # 🟡 Caso: múltiples modelos → listar precios uno por uno
+        for modelo_raw in modelos:
+            partes = modelo_raw.split()
+            if len(partes) >= 3:
+                marca = partes[0]
+                modelo = partes[1]
+                color = " ".join(partes[2:])
+            else:
+                continue
+
+            item = next(
+                (i for i in inv if
+                 normalize(i["modelo"]) == normalize(modelo) and
+                 normalize(i["color"]) == normalize(color) and
+                 normalize(i["marca"]) == normalize(marca)),
+                None
+            )
+
+            if item and item.get("precio"):
+                precio = f"{int(item['precio']):,} COP"
+                respuestas.append(f"💰 *{modelo_raw}*: {precio}")
+
+        if respuestas:
+            return {
+                "type": "text",
+                "text": "\n".join(respuestas) + "\n\n🚚 Envío totalmente gratis a cualquier ciudad de Colombia.",
+                "parse_mode": "Markdown"
+            }
+        else:
+            return {
+                "type": "text",
+                "text": "❌ No encontré los precios exactos de esos modelos. ¿Quieres que te los confirme manualmente?",
+                "parse_mode": "Markdown"
+            }
+
+
+
+    # 💰 Usuario pregunta por precio de modelo ya mostrado (sin repetir imagen)
+    if est.get("modelo") and est.get("color"):
+        if any(palabra in texto for palabra in (
+            "cuánto vale", "cuanto vale", "precio", "cuánto cuesta", "cuanto cuesta", "vale los", "cuánto valen", "cuanto valen"
+        )):
+            modelo = est["modelo"]
+            color = est["color"]
+            marca = est.get("marca", "DS")  # por defecto DS
+
+            item = next(
+                (i for i in inv if
+                 normalize(i["modelo"]) == normalize(modelo) and
+                 normalize(i["color"]) == normalize(color) and
+                 normalize(i["marca"]) == normalize(marca)),
+                None
+            )
+            if item and item.get("precio"):
+                precio = f"{int(item['precio']):,} COP"
+                return {
+                    "type": "text",
+                    "text": (
+                        f"💰 El precio de los *{modelo}* color *{color}* es: *{precio}*.\n"
+                        "🚚 Recuerda que el *envío es gratis* a todo Colombia."
+                    ),
+                    "parse_mode": "Markdown"
+                }
+            else:
+                return {
+                    "type": "text",
+                    "text": "❌ Aún no tengo registrado el precio exacto para ese modelo. ¿Te gustaría que lo consulte por ti?"
+                }
 
     # 🎨 Si el cliente dice "me gustaron los amarillos", "quiero los rojos", etc.
     if detectar_color(txt):
@@ -1932,8 +2042,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 logging.error(f"❌ Error enviando imagen: {e}")
-
-
 
 
         # 🧠 Guardar estado
@@ -3952,22 +4060,43 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
-        estado_usuario[cid] = {"fase": "inicio"}
+        estado_usuario[cid] = {
+            "fase": "inicio",
+            "esperando_nombre": True  # 🆕 Flag de bienvenida
+        }
+
+    est = estado_usuario.get(cid, {})
 
 
-       # 👤 Detectar nombre o ciudad en frases sueltas
-    match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
-    if match_nombre:
-        nombre = match_nombre.group(2).capitalize()
-        est["nombre"] = nombre
+    # 👤 Solo aceptar nombre/ciudad si se pidió explícitamente luego del welcome
+    if est.get("fase") == "inicio" and est.get("esperando_nombre"):
+        match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
+        if match_nombre:
+            est["nombre"] = match_nombre.group(2).capitalize()
 
-    match_ciudad = re.search(r"(de|desde|en)\s+([a-zA-Záéíóúñ\s]+)", normalize(txt))
-    if match_ciudad:
-        ciudad = match_ciudad.group(2).strip().title()
-        est["ciudad"] = ciudad
+        match_ciudad = re.search(r"(de|desde|en)\s+([a-zA-Záéíóúñ\s]+)", normalize(txt))
+        if match_ciudad:
+            est["ciudad"] = match_ciudad.group(2).strip().title()
 
+        # Si se detectó al menos uno de los dos, guardar y responder
+        if "nombre" in est or "ciudad" in est:
+            est["esperando_nombre"] = False  # ✅ No volver a pedir
+            estado_usuario[cid] = est
+
+            return {
+                "type": "text",
+                "text": (
+                    f"👋 Hola {est.get('nombre', 'amig@')}! "
+                    f"{'Qué bueno que seas de ' + est['ciudad'] if 'ciudad' in est else ''} 🏡\n"
+                    "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
+                )
+            }
+
+    # Si se detectó al menos uno de los dos, guardar y responder
     if "nombre" in est or "ciudad" in est:
+        est["esperando_nombre"] = False  # ✅ No volver a pedir
         estado_usuario[cid] = est
+
         return {
             "type": "text",
             "text": (
@@ -3976,6 +4105,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
             )
         }
+
+    # ✅ Permitir continuar flujo si el usuario ignora la pregunta
+    est["esperando_nombre"] = False
+    estado_usuario[cid] = est
 
 
 
