@@ -882,11 +882,11 @@ def menciona_catalogo(texto: str) -> bool:
         "catalogo", "ver catalogo", "mostrar catalogo", "quiero ver",
         "ver productos", "mostrar productos", "ver lo que tienes",
         "ver tenis", "muestrame", "mostrar lo que tienes",
-        "que estilos tiene", "ensename el catalogo", "tienes imagenes",
+        "que estilos tiene", "no tengo imagenes", "tienes imagenes",
         "mandame el catalogo", "quiero ver modelos", "ver referencias",
         "quiero referencias", "muestrame los modelos", "que modelos tienes",
-        "que modelos hay", "que tienes", "mandame fotos", "mandame las imagenes",
-        "enviame modelos", "quiero ver imagenes", "tenis que tienes",
+        "que modelos hay", "envielas", "mandame fotos", "mandame las imagenes",
+        "envielas usted", "quiero ver imagenes", "tenis que tienes",
         "que hay", "quiero ver los pares", "muestra los tenis",
         "cuales modelos tienes", "mande fotos", "muestrame los pares",
         "ver opciones", "tienes fotos", "ver modelos disponibles",
@@ -1866,8 +1866,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 modelo = archivo.replace(".jpg", "").replace("_", " ")
                 modelos_enviados.append(modelo)
 
-                precio = obtener_precio(modelo)
-                caption = f"📸 Modelo en color *{color.upper()}*: *{modelo}*\n💰 Precio: {precio if precio else 'Consultar'}"
+                item = next((i for i in inv if normalize(i["modelo"]) == normalize(modelo)), None)
+                precio = f"{int(item['precio']):,} COP" if item else "Consultar"
+                caption = f"📸 Modelo en color *{color.upper()}*: *{modelo}*\n💰 Precio: {precio}"
 
                 await ctx.bot.send_photo(
                     chat_id=cid,
@@ -1929,6 +1930,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa.")
         return
+
 
 
 
@@ -3881,6 +3883,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
+    
     # Lista de palabras afirmativas comunes
     AFIRMATIVAS = [
         "si", "sí", "sii", "sis", "sisz", "siss", "de una", "dale", "hágale", "hagale", 
