@@ -1887,7 +1887,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="🧐 ¿Dime que referencia te interesa?"
+                text="🧐 ¿Dime que referencia te interesan, si no esta aca enviame la foto?"
             )
 
             # Solo cambiar la fase sin borrar el estado anterior
@@ -2138,7 +2138,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "parse_mode": "Markdown"
                 }
 
-        await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa.")
+        await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa, si no esta aca enviame la imagen.")
         return
 
 
@@ -2302,7 +2302,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
 
             # Pregunta normal si no pidió precio
-            await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa.")
+            await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa, si no esta aca enviame una foto.")
             return
 
     except Exception as e:
@@ -3965,10 +3965,193 @@ import base64  # Asegúrate de que esté arriba del archivo
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid = str(cid)
-    texto = body.lower() if body else ""
-    txt = texto if texto else ""
+    cid     = str(cid)
+    texto   = body.lower() if body else ""
+    txt     = texto
     txt_raw = body or ""
+
+    # ─────────── Preguntas frecuentes (FAQ) ───────────
+    if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+
+        # FAQ 1: ¿Cuánto demora el envío?
+        if any(p in texto for p in (
+            "cuanto demora", "cuanto tarda", "cuanto se demora",
+            "en cuanto llega", "me llega rapido", "llegan rapido"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "🚚 El tiempo de entrega depende de la ciudad de destino, "
+                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
+                    "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
+                    "En ese caso aplica *pago anticipado* (no contra entrega)."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 2: ¿Pago contra entrega?
+        if any(p in texto for p in (
+            "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
+            "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
+        )):
+            try:
+                ruta_audio = "/var/data/audios/contraentrega/CONTRAENTREGA.mp3"
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio CONTRAENTREGA.mp3")
+
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "CONTRAENTREGA.mp3",
+                    "text": "🎧 Aquí tienes la explicación del pago contra entrega:"
+                }
+
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio CONTRAENTREGA: {e}")
+                return {
+                    "type": "text",
+                    "text": "⚠️ No pude enviar el audio en este momento."
+                }
+
+        # FAQ 3: ¿Tienen garantía?
+        if any(p in texto for p in (
+            "tienen garantia", "hay garantia", "garantia", "tienen garantia de fabrica"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "🛡️ Todos nuestros productos tienen *garantía de 60 días* "
+                    "por defectos de fábrica o problemas de pegado.\n\n"
+                    "Cualquier inconveniente, estamos para ayudarte."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 5: ¿Dónde están ubicados?
+        if any(p in texto for p in (
+            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
+            "direccion", "tienda fisica", "donde estan", "donde es la tienda",
+            "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 6: ¿Son nacionales o importados?
+        if any(p in texto for p in (
+            "son nacionales", "son importados", "es nacional o importado",
+            "nacionales o importados", "hecho en colombia", "fabricados en colombia",
+            "son de aqui", "es de colombia", "fabricacion colombiana"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
+                    "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 7: ¿Son originales?
+        if any(p in texto for p in (
+            "son originales", "es original", "originales",
+            "es copia", "son copia", "son replica", "réplica", "imitacion"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana reconocida por su calidad y diseño."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 8: ¿De qué calidad son?
+        if any(p in texto for p in (
+            "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
+            "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
+                    "Cada par se fabrica cuidadosamente para asegurar *calidad AAA* 👟🔝, "
+                    "garantizando comodidad, durabilidad y excelente acabado."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 9: ¿Hay descuento por 2 pares?
+        if any(p in texto for p in (
+            "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
+            "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
+            "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "🎉 ¡Sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
+                    "¡Aprovecha para estrenar más y pagar menos! 🔥👟👟"
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 10: ¿Precios para mayoristas?
+        if any(p in texto for p in (
+            "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
+            "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
+            "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "🛍️ ¡Claro! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
+                    "sin importar tallas ni referencias.\n\n"
+                    "Condición: vender mínimo al mismo precio que nosotros para cuidar el mercado."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 11: ¿Las tallas son normales?
+        if any(p in texto for p in (
+            "las tallas son normales", "horma normal", "talla normal",
+            "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
+            "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
+                    "Para mayor seguridad, puedes enviarnos una foto de la *etiqueta interna* de tus tenis actuales 📏✨."
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # FAQ 12: ¿Talla más grande?
+        if any(p in texto for p in (
+            "talla mas grande", "talla más grande", "cual es la talla mas grande",
+            "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "📏 La talla más grande que manejamos es:\n\n"
+                    "• *45 Nacional* 🇨🇴\n"
+                    "• *47 Europeo* 🇪🇺\n\n"
+                    "¡También tenemos opciones para pies grandes! 👟✨"
+                ),
+                "parse_mode": "Markdown"
+            }
 
     # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
     if "envio" in texto:
@@ -4228,7 +4411,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 })
                 videos.append({
                     "type": "text",
-                    "text": "🧐 Dime que referencia te interesa?"
+                    "text": "🧐 Dime que referencia te interesa, si no esta aca enviame una?"
                 })
 
             # 4. Enviar primero los videos, luego bienvenida
@@ -4281,213 +4464,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "❌ No pude generar el audio en este momento."
             }
-
-    # ─────────── Preguntas frecuentes (FAQ) ───────────
-    if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
-        texto_normalizado = normalize(txt_raw)
-
-
-
-        # FAQ 1: ¿Cuánto demora el envío?
-        if any(frase in texto_normalizado for frase in (
-                     "cuanto demora", "cuanto tarda", "cuanto se demora",
-                     "en cuanto llega", "me llega rapido", "llegan rapido"
-        )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
-                    "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
-                    "En ese caso aplica *pago anticipado* (no contra entrega)."
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
-        # FAQ 2: ¿Tienen pago contra entrega?
-        if any(frase in texto_normalizado for frase in (
-            "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
-            "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
-        )):
-            try:
-                ruta_audio = "/var/data/audios/contraentrega/CONTRAENTREGA.mp3"
-
-                if not os.path.exists(ruta_audio):
-                    raise FileNotFoundError("❌ No se encontró el audio CONTRAENTREGA.mp3")
-
-                with open(ruta_audio, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-
-                return {
-                    "type": "audio",
-                    "base64": b64,
-                    "mimetype": "audio/mpeg",
-                    "filename": "CONTRAENTREGA.mp3",
-                    "text": "🎧 Aquí tienes la explicación del pago contra entrega:"
-                }
-
-            except Exception as e:
-                logging.error(f"❌ Error enviando audio CONTRAENTREGA: {e}")
-                return {
-                    "type": "text",
-                    "text": "⚠️ No pude enviar el audio en este momento."
-                }
-
-
-        # FAQ 3: ¿Tienen garantía?
-        if any(frase in texto_normalizado for frase in (
-            "tienen garantia", "hay garantia", "garantia", "tienen garantia de fabrica"
-        )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🛡️ Todos nuestros productos tienen *garantía de 60 días* "
-                    "por defectos de fábrica o problemas de pegado.\n\n"
-                    "Cualquier inconveniente, estamos para ayudarte."
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
-
-    # FAQ 5: ¿Dónde están ubicados?
-    if est.get("fase") not in ("editando_dato", "esperando_direccion", "confirmar_datos_guardados"):
-        if any(frase in txt for frase in (
-            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-            "direccion", "dirección", "donde estan", "donde es la tienda",
-            "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
-        )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
-
-        # FAQ 6: ¿Son nacionales o importados?
-        if any(frase in txt for frase in (
-            "son nacionales", "son importados", "es nacional o importado",
-            "nacionales o importados", "hecho en colombia", "fabricados en colombia",
-            "son de aqui", "es de colombia", "fabricacion colombiana"
-        )):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
-                    "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
-                ),
-                parse_mode="Markdown"
-            )
-            await reanudar_fase_actual(cid, ctx, est)
-            return
-
-
-    # FAQ 7: ¿Son originales?
-    if any(frase in txt for frase in (
-        "son originales", "es original", "originales",
-        "es copia", "son copia", "son replica", "réplica", "imitacion"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana reconocida por su calidad y diseño.",
-            parse_mode="Markdown"
-        )
-        await reanudar_fase_actual(cid, ctx, est)
-        return
-
-    # FAQ 8: ¿De qué calidad son?
-    if any(frase in txt for frase in (
-        "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
-        "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
-                "Cada par se fabrica cuidadosamente para asegurar *calidad AAA* 👟🔝, "
-                "garantizando comodidad, durabilidad y excelente acabado."
-            ),
-            parse_mode="Markdown"
-        )
-        await reanudar_fase_actual(cid, ctx, est)
-        return
-
-    # FAQ 9: ¿Hay descuento si compro 2 pares?
-    if any(frase in txt for frase in (
-        "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
-        "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
-        "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🎉 ¡Sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
-                "¡Aprovecha para estrenar más y pagar menos! 🔥👟👟"
-            ),
-            parse_mode="Markdown"
-        )
-        await reanudar_fase_actual(cid, ctx, est)
-        return
-
-    # FAQ 10: ¿Manejan precios para mayoristas?
-    if any(frase in txt for frase in (
-        "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
-        "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
-        "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🛍️ ¡Claro! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
-                "sin importar tallas ni referencias.\n\n"
-                "Condición: vender mínimo al mismo precio que nosotros para cuidar el mercado."
-            ),
-            parse_mode="Markdown"
-        )
-        await reanudar_fase_actual(cid, ctx, est)
-        return
-
-    # FAQ 11: ¿Las tallas son normales o grandes?
-    if any(frase in txt for frase in (
-        "las tallas son normales", "horma normal", "talla normal",
-        "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
-        "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
-                "Para mayor seguridad, puedes enviarnos una foto de la *etiqueta interna* de tus tenis actuales 📏✨."
-            ),
-            parse_mode="Markdown"
-        )
-        await reanudar_fase_actual(cid, ctx, est)
-        return
-
-    # FAQ 12: ¿Cuál es la talla más grande que manejan?
-    if any(frase in txt for frase in (
-        "talla mas grande", "talla más grande", "cual es la talla mas grande",
-        "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "📏 La talla más grande que manejamos es:\n\n"
-                "• *45 Nacional* 🇨🇴\n"
-                "• *47 Europeo* 🇪🇺\n\n"
-                "¡También tenemos opciones para pies grandes! 👟✨"
-            ),
-            parse_mode="Markdown"
-        )
-        await reanudar_fase_actual(cid, ctx, est)
-        return
+        
     # ─── MAIN try/except ───
     try:
         reply = await responder(dummy_update, ctx)
