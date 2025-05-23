@@ -4890,8 +4890,7 @@ if __name__ == "__main__":
     descargar_video_confianza()
     descargar_audios_bienvenida_drive()
     descargar_imagen_lengueta()
-    descargar_imagen_metodos_pago()       # 🆕 Descarga la imagen metodosdepago.jpeg
-
+    descargar_metodos_pago_drive()
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
