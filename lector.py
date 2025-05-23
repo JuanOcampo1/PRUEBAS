@@ -176,6 +176,51 @@ def descargar_imagen_lengueta():
 
     except Exception as e:
         logging.error(f"❌ Error descargando imagen de lengüeta: {e}")
+def descargar_metodos_pago_drive():
+    """
+    Descarga la imagen 'metodosdepago.jpeg' desde Google Drive.
+    Guarda el archivo como /var/data/extra/metodosdepago.jpeg
+    """
+    try:
+        print(">>> descargar_metodos_pago_drive() – iniciando")
+        service = get_drive_service()
+        carpeta_id = "1GF3rdTM0t81KRIb6xbQ1uNV4uC4A7LvE"  # misma carpeta que lengüeta
+        destino = "/var/data/extra/metodosdepago.jpeg"
+
+        os.makedirs("/var/data/extra", exist_ok=True)
+
+        archivo = service.files().list(
+            q=f"'{carpeta_id}' in parents and name = 'metodosdepago.jpeg' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivo:
+            logging.warning("⚠️ No se encontró 'metodosdepago.jpeg'")
+            return
+
+        file_id = archivo[0]["id"]
+
+        if os.path.exists(destino):
+            logging.info("📦 Imagen de métodos de pago ya existe. Omitiendo descarga.")
+            return
+
+        logging.info("⬇️ Descargando imagen de métodos de pago")
+        request = service.files().get_media(fileId=file_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Imagen guardada en: {destino}")
+
+    except Exception as e:
+        logging.error(f"❌ Error descargando 'metodosdepago.jpeg': {e}")
 
 CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
 
@@ -3964,6 +4009,36 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
+    # 💳 Métodos de pago — bloque universal
+    if any(p in texto for p in (
+        "método de pago", "metodos de pago", "formas de pago", "formas para pagar",
+        "como pago", "cómo puedo pagar", "qué medios de pago", "medios de pago", "aceptan nequi",
+        "pago por daviplata", "manejan bancolombia", "que pago manejan", "que pagos manejan"
+    )):
+        ruta_metodo = "/var/data/extra/metodosdepago.jpeg"
+        if os.path.exists(ruta_metodo):
+            with open(ruta_metodo, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": "💳 Estos son los *métodos de pago* que manejamos actualmente:",
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "📷 Métodos de pago disponibles"
+                        }
+                    ]
+                }
+        else:
+            return {
+                "type": "text",
+                "text": "💳 Aceptamos *Nequi, Daviplata, Bancolombia* y también *contraentrega*."
+            }
 
     # Lista de palabras afirmativas comunes
     AFIRMATIVAS = [
@@ -4067,7 +4142,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     est = estado_usuario.get(cid, {})
 
-
     # 👤 Solo aceptar nombre/ciudad si se pidió explícitamente luego del welcome
     if est.get("fase") == "inicio" and est.get("esperando_nombre"):
         match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
@@ -4078,37 +4152,28 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         if match_ciudad:
             est["ciudad"] = match_ciudad.group(2).strip().title()
 
-        # Si se detectó al menos uno de los dos, guardar y responder
         if "nombre" in est or "ciudad" in est:
-            est["esperando_nombre"] = False  # ✅ No volver a pedir
+            # ✅ Guardar y responder — sin riesgo de None
+            est["esperando_nombre"] = False
             estado_usuario[cid] = est
+
+            ciudad = est.get("ciudad")          # puede ser None
+            ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
 
             return {
                 "type": "text",
                 "text": (
                     f"👋 Hola {est.get('nombre', 'amig@')}! "
-                    f"{'Qué bueno que seas de ' + est['ciudad'] if 'ciudad' in est else ''} 🏡\n"
+                    f"{ciudad_texto}"
                     "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
-                )
+                ),
+                "parse_mode": "Markdown"
             }
 
-    # Si se detectó al menos uno de los dos, guardar y responder
-    if "nombre" in est or "ciudad" in est:
-        est["esperando_nombre"] = False  # ✅ No volver a pedir
+        # ⚠️ El usuario ignoró la pregunta — permite continuar flujo
+        est["esperando_nombre"] = False
         estado_usuario[cid] = est
 
-        return {
-            "type": "text",
-            "text": (
-                f"👋 Hola {est.get('nombre', 'amig@')}! "
-                f"{'Qué bueno que seas de ' + est['ciudad'] if 'ciudad' in est else ''} 🏡\n"
-                "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
-            )
-        }
-
-    # ✅ Permitir continuar flujo si el usuario ignora la pregunta
-    est["esperando_nombre"] = False
-    estado_usuario[cid] = est
 
 
 
@@ -4817,14 +4882,14 @@ async def venom_webhook(req: Request):
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
-    descargar_videos_drive()          # ⬇️ Descarga los videos (si no existen)
-    descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
+    descargar_videos_drive()              # ⬇️ Descarga los videos (si no existen)
+    descargar_imagenes_catalogo()         # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
     descargar_video_confianza()
     descargar_audios_bienvenida_drive()
     descargar_imagen_lengueta()
+    descargar_imagen_metodos_pago()       # 🆕 Descarga la imagen metodosdepago.jpeg
+
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
-
-
