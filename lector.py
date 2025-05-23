@@ -3970,6 +3970,35 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     txt     = texto
     txt_raw = body or ""
 
+    # 🧠 Inicializa estado si no existe  ←  <<— NUEVA POSICIÓN
+    if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
+        reset_estado(cid)
+        estado_usuario[cid] = {
+            "fase": "inicio",
+            "esperando_nombre": True        # 🆕 Flag de bienvenida (solo se usa una vez)
+        }
+
+    est = estado_usuario[cid]              # ← existe sí o sí
+    # ─── FILTRO 1: mensaje vacío ───
+    if not body or not body.strip():
+        print(f"[IGNORADO] Mensaje vacío de {cid}")
+        return {"type": "text", "text": ""}
+
+    # ─── FILTRO 2: anti‑duplicados (<30 s) ───
+    DEDUP_WINDOW = 30
+    now = time.time()
+    info = ultimo_msg.get(cid)
+    if info and msg_id and msg_id == info["id"] and now - info["t"] < DEDUP_WINDOW:
+        print(f"[IGNORADO] Duplicado reciente de {cid}")
+        return {"type": "text", "text": ""}
+    if msg_id:
+        ultimo_msg[cid] = {"id": msg_id, "t": now}
+
+    # Función auxiliar para codificar imagen como base64
+    def codificar_base64(path, tipo='image/jpeg'):
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:{tipo};base64,{b64}"
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
@@ -4230,30 +4259,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "obvio", "eso es", "ese", "de ley", "de fijo", "ok", "okay", "listo"
     ]
 
-    # ─── FILTRO 1: mensaje vacío ───
-    if not body or not body.strip():
-        print(f"[IGNORADO] Mensaje vacío de {cid}")
-        return {"type": "text", "text": ""}
 
-    # ─── FILTRO 2: anti‑duplicados (<30 s) ───
-    DEDUP_WINDOW = 30
-    now = time.time()
-    info = ultimo_msg.get(cid)
-    if info and msg_id and msg_id == info["id"] and now - info["t"] < DEDUP_WINDOW:
-        print(f"[IGNORADO] Duplicado reciente de {cid}")
-        return {"type": "text", "text": ""}
-    if msg_id:
-        ultimo_msg[cid] = {"id": msg_id, "t": now}
-
-    # 🔐 Asegurar estado del usuario (previene error con est.get)
-    est = estado_usuario.get(cid, {})
-
-
-    # Función auxiliar para codificar imagen como base64
-    def codificar_base64(path, tipo='image/jpeg'):
-        with open(path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-        return f"data:{tipo};base64,{b64}"
 
     # ───────────────────────────────────────────
     # ───────────────────────────────────────────
@@ -4312,21 +4318,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         effective_chat=SimpleNamespace(id=cid)
     )
 
-
-
-
-    # 🧠 Inicializa estado si no existe
-    if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
-        reset_estado(cid)
-        estado_usuario[cid] = {
-            "fase": "inicio",
-            "esperando_nombre": True        # 🆕 Flag de bienvenida (solo se usa una vez)
-        }
-
-    est = estado_usuario.get(cid, {})
-
     # 👤 Solo aceptar nombre/ciudad si se pidió explícitamente luego del welcome
     if est.get("fase") == "inicio" and est.get("esperando_nombre"):
+
         match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
         if match_nombre:
             est["nombre"] = match_nombre.group(2).capitalize()
@@ -4335,13 +4329,13 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         if match_ciudad:
             est["ciudad"] = match_ciudad.group(2).strip().title()
 
-        # ▶️ Si obtuvo al menos nombre o ciudad, responde y deja de esperar
+        # ▶️ Si obtuvo al menos nombre o ciudad por regex
         if "nombre" in est or "ciudad" in est:
             est["esperando_nombre"] = False
             estado_usuario[cid] = est
 
-            nombre  = est.get("nombre", "amig@")
-            ciudad  = est.get("ciudad")
+            nombre = est.get("nombre", "amig@")
+            ciudad = est.get("ciudad")
             ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
 
             return {
@@ -4354,9 +4348,64 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # ▶️ Usuario ignoró la pregunta. Deja de esperar y continúa flujo normal
+        # ▶️ Si no detectó por regex, usar IA para intentar extraer
+        try:
+            prompt = (
+                f"Extrae el nombre y ciudad del siguiente mensaje si están presentes:\n"
+                f"'{texto}'\n\n"
+                "Responde en JSON. Ejemplo:\n"
+                "{ \"nombre\": \"Laura\", \"ciudad\": \"Cali\" }.\n"
+                "Si no hay datos, responde con: {}"
+            )
+
+            respuesta = await openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{ "role": "user", "content": prompt }],
+                temperature=0,
+                response_format="json"
+            )
+
+            content = respuesta.choices[0].message.content
+            try:
+                datos = json.loads(content)
+            except json.JSONDecodeError as e:
+                logging.warning(f"⚠️ Error al parsear JSON IA: {e} | content: {content}")
+                datos = {}
+
+            if "nombre" in datos or "ciudad" in datos:
+                est["nombre"] = datos.get("nombre")
+                est["ciudad"] = datos.get("ciudad")
+
+                if est.get("nombre"):
+                    est["nombre"] = str(est["nombre"]).strip().capitalize()
+                if est.get("ciudad"):
+                    est["ciudad"] = str(est["ciudad"]).strip().title()
+
+                est["esperando_nombre"] = False
+                estado_usuario[cid] = est
+
+                nombre = est.get("nombre", "amig@")
+                ciudad = est.get("ciudad")
+                ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
+
+                return {
+                    "type": "text",
+                    "text": (
+                        f"👋 Hola {nombre}! "
+                        f"{ciudad_texto}"
+                        "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
+                    ),
+                    "parse_mode": "Markdown"
+                }
+
+        except Exception as e:
+            logging.warning(f"⚠️ Error usando IA para extraer nombre/ciudad: {e}")
+
+        # ▶️ Si el usuario ignoró la pregunta, continúa flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
+
+
 
 
 
