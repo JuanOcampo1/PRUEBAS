@@ -2005,30 +2005,47 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "text": "❌ Aún no tengo registrado el precio exacto para ese modelo. ¿Te gustaría que lo consulte por ti?"
                 }
 
-    # 🎨 Si el cliente dice "me gustaron los amarillos", "quiero los rojos", etc.
+    # 🎨 El cliente menciona un color (p.e. "me gustaron los amarillos")
     if detectar_color(txt):
+        txt   = texto                              # asegura txt
         color = detectar_color(txt)
 
-        # ⚠️ Interceptar preguntas frecuentes sin romper el flujo
+        # ── FAQs rápidas SIN romper el flujo de compra ──────────────────
         texto_normalizado = normalize(txt)
         faq_detectadas = {
-            "envio": "🚚 El envío tarda entre *1 a 3 días hábiles* dependiendo de tu ciudad.",
-            "pago": "💳 Aceptamos Nequi, Daviplata, Bancolombia y también contraentrega.",
-            "garantia": "✅ Todos los productos tienen *60 días de garantía* por defectos de fábrica.",
-            "tallas": "👟 Trabajamos desde la talla *34 hasta la 45* dependiendo del modelo.",
-            "original": "✅ Sí, son *originales y hechos en Colombia* 🇨🇴.",
-            "ubicacion": "📍 Estamos en *Bucaramanga*. Enviamos a todo el país.",
+            "envio": (
+                "🚚 El envío tarda entre *1 a 3 días hábiles* dependiendo de tu ciudad."
+            ),
+            "pago": (
+                "💳 Aceptamos Nequi, Daviplata, Bancolombia y también contraentrega."
+            ),
+            "garantia": (
+                "✅ Todos los productos tienen *60 días de garantía* por defectos de fábrica."
+            ),
+            "tallas": (
+                "👟 Trabajamos desde la talla *34 hasta la 45* dependiendo del modelo."
+            ),
+            "original": (
+                "✅ Sí, son *originales y hechos en Colombia* 🇨🇴."
+            ),
+            "ubicacion": (
+                "📍 Estamos en *Bucaramanga*. Enviamos a todo el país."
+            ),
+            "bucaramanga": (
+                "📦 Se te puede enviar *hoy mismo* y lo puedes *recoger en la tienda* 🏬 "
+                "o te lo enviamos con un *domiciliario* y pagas al recibir 🛵💵."
+            ),
         }
-
-        for clave, respuesta in faq_detectadas.items():
+        for clave, resp in faq_detectadas.items():
             if clave in texto_normalizado:
                 await ctx.bot.send_message(
                     cid,
-                    f"{respuesta}\n\n🧐 ¿Seguimos con los modelos color *{color.upper()}* que te gustaron?"
+                    f"{resp}\n\n🧐 ¿Seguimos con los modelos color *{color.upper()}* que te gustaron?"
                 )
                 return
+        # ────────────────────────────────────────────────────────────────
 
-        # 📂 Buscar imágenes
+        # 📂 Buscar imágenes del color
         ruta = "/var/data/modelos_video"
         if not os.path.exists(ruta):
             await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
@@ -2039,7 +2056,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f for f in os.listdir(ruta)
             if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases_del_color)
         ]
-
         if not coincidencias:
             await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.") 
             return
@@ -2050,12 +2066,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 path = os.path.join(ruta, archivo)
 
                 modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
-                partes = modelo_raw.split()
-
-                if len(partes) >= 3:
-                    marca = partes[0]
-                    modelo = partes[1]
-                    color_archivo = " ".join(partes[2:])
+                partes = modelo_raw.split(maxsplit=2)  # marca modelo color
+                if len(partes) == 3:
+                    marca, modelo, color_archivo = partes
                 else:
                     marca = modelo = color_archivo = ""
 
@@ -2064,14 +2077,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 item = next(
                     (i for i in inv if
                      normalize(i["modelo"]) == normalize(modelo) and
-                     normalize(i["color"]) == normalize(color_archivo) and
-                     normalize(i["marca"]) == normalize(marca)),
+                     normalize(i["color"])  == normalize(color_archivo) and
+                     normalize(i["marca"])  == normalize(marca)),
                     None
                 )
                 precio = f"{int(item['precio']):,} COP" if item else "Consultar"
 
-                caption = f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n💰 Precio: {precio}"
-
+                caption = (
+                    f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n"
+                    f"💰 Precio: {precio}"
+                )
                 await ctx.bot.send_photo(
                     chat_id=cid,
                     photo=open(path, "rb"),
@@ -2081,59 +2096,107 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logging.error(f"❌ Error enviando imagen: {e}")
 
-
-        # 🧠 Guardar estado
-        est["color"] = color
-        est["fase"] = "esperando_modelo_elegido"
+        # 🧠 Guardar estado tras mostrar imágenes
+        est["color"]            = color
+        est["fase"]             = "esperando_modelo_elegido"
         est["modelos_enviados"] = modelos_enviados
-        estado_usuario[cid] = est
+        estado_usuario[cid]     = est
 
-        # 🆕 Si el cliente pregunta por talla justo después
-        consulta_talla = re.search(
-            r"(?:tienen|tiene|hay|maneja(?:n)?)\s+talla\s+(\d{1,2})", txt
+        await ctx.bot.send_message(
+            cid,
+            "🧐 Dime qué referencia te interesa (por ejemplo *305*) "
+            "o envíame una imagen del modelo que deseas.",
+            parse_mode="Markdown"
         )
-        if consulta_talla:
-            talla_pedida = consulta_talla.group(1)
+        return
+
+
+    # ── Cliente responde después de ver las imágenes ──
+    if est.get("fase") == "esperando_modelo_elegido":
+        modelos = est.get("modelos_enviados", [])
+        txt     = texto  # seguridad
+
+        # 1️⃣  Si envió el número de referencia directamente (p.e. "305")
+        match_ref = re.search(r"\b(\d{3})\b", txt)
+        if match_ref:
+            ref = match_ref.group(1)
+            modelo_elegido = next((m for m in modelos if ref in m), None)
+            if modelo_elegido:
+                est["modelo"] = modelo_elegido
+                estado_usuario[cid] = est
+            else:
+                await ctx.bot.send_message(
+                    cid,
+                    "❌ No encontré ese número entre las imágenes enviadas. "
+                    "Vuelve a escribirlo o envíame la imagen del modelo."
+                )
+                return
+
+        # 2️⃣  Si solo había UNA imagen y la respuesta es afirmativa genérica
+        elif len(modelos) == 1 and any(pal in txt for pal in (
+            "si", "sí", "sii", "sisas", "sisz",
+            "de una", "quiero esos", "me gustaron esos", "hágale", "De una me los llevo",
+            "me gustaron", "quiero", "esos me gustan", "quiero esos",
+            "me llevo esos", "obvio", "si son esos"
+        )):
+            est["modelo"] = modelos[0]
+            estado_usuario[cid] = est
+
+        # 3️⃣  Si aún no conocemos modelo elegido
+        if not est.get("modelo"):
+            await ctx.bot.send_message(
+                cid,
+                "❓ Dime cuál referencia te gustó (ej. *305*) o envíame la foto del modelo."
+            )
+            return
+
+        # 👉  Ya tenemos modelo, verificar talla en la misma frase
+        match_talla = re.search(r"talla\s+(\d{1,2})", txt)
+        if match_talla:
+            talla = match_talla.group(1)
+            est["talla"] = talla
+            est["fase"]  = "esperando_talla"
+            estado_usuario[cid] = est
+        else:
             est["fase"] = "esperando_talla"
             estado_usuario[cid] = est
 
-            ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
-            if os.path.exists(ruta_ejemplo):
-                with open(ruta_ejemplo, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
+        #  ↪️  Responder solicitando/lengüeta
+        ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
+        if os.path.exists(ruta_ejemplo):
+            with open(ruta_ejemplo, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
 
-                return {
-                    "type": "multi",
-                    "messages": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"✅ ¡Sí! Tenemos modelos en talla *{talla_pedida}*. "
-                                "📸 Para confirmar que te quede bien, mándame una foto de la *lengüeta* "
-                                "del zapato que usas normalmente 👟."
-                            ),
-                            "parse_mode": "Markdown"
-                        },
-                        {
-                            "type": "photo",
-                            "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                        }
-                    ]
-                }
-            else:
-                return {
-                    "type": "text",
-                    "text": (
-                        f"✅ ¡Tenemos talla {talla_pedida}! "
-                        "Por favor mándame una foto de la lengüeta de tu zapato para saber la talla exacta 👟."
-                    ),
-                    "parse_mode": "Markdown"
-                }
-
-        await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa, si no esta aca enviame la imagen.")
-        return
-
+            return {
+                "type": "multi",
+                "messages": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"✅ Perfecto, tomaremos *{est['modelo']}*"
+                            + (f" en talla *{est['talla']}*" if est.get("talla") else "")
+                            + ".\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* "
+                            "del zapato que usas normalmente 👟."
+                        ),
+                        "parse_mode": "Markdown"
+                    },
+                    {
+                        "type": "photo",
+                        "base64": f"data:image/jpeg;base64,{b64}",
+                        "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                    }
+                ]
+            }
+        else:
+            return {
+                "type": "text",
+                "text": (
+                    f"✅ Perfecto, tomaremos *{est['modelo']}*"
+                    + (f" en talla *{est['talla']}*" if est.get("talla") else "")
+                    + ".\nEnvíame la foto de la lengüeta de tu zapato para confirmar la medida 👟."
+                ),
+                "parse_mode": "Markdown"
+            }
 
 
 
@@ -2894,7 +2957,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
                 f"💲Valor a pagar: {precio:,} COP\n\n"
                 "¿Cómo deseas hacer el pago?\n"
-                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💸 *Contraentrega*: adelanta 30 000 COP (se descuenta del total).\n"
                 "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
                 "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
                 "Escribe *Transferencia*, *Contraentrega* o *Addi*."
@@ -3145,7 +3208,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             msg += (
                 "¿Cómo deseas hacer el pago?\n"
-                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💸 *Contraentrega*: adelanta 30 000 COP (se descuenta del total).\n"
                 "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
                 "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
                 "Escribe *Transferencia*, *Contraentrega* o *Addi*."
@@ -3215,13 +3278,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["metodo_pago"] = "Contraentrega"
             resumen.update({
                 "Pago": "Contra entrega",
-                "Valor Anticipo": 35000
+                "Valor Anticipo": 30000
             })
 
             estado_usuario[cid] = est
             msg = (
                 "🟡 Elegiste *CONTRAENTREGA*.\n\n"
-                "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
+                "Debes adelantar *30 000 COP* para el envío (se descuenta del total).\n\n"
                 "💳 Cuentas:\n"
                 "- Bancolombia 30300002233 (X100 SAS)\n"
                 "- Nequi 317 717 1171\n"
