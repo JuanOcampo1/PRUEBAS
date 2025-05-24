@@ -1,4 +1,3 @@
-CREO QUE MEDIO SEGURO
 # ——— Librerías estándar de Python ———
 import os
 import io
