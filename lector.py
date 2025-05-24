@@ -1,3 +1,4 @@
+CREO QUE MEDIO SEGURO
 # ——— Librerías estándar de Python ———
 import os
 import io
@@ -733,23 +734,12 @@ async def detectar_ciudad(texto: str, client) -> str:
                 {"role": "user", "content": prompt}
             ]
         )
-
-        ciudad = respuesta.choices[0].message.content.strip().lower().strip(".").strip()
-
-        # 🚫 Si la IA respondió "ninguna" o dejó vacío, no lo usamos
-        if not ciudad or ciudad == "ninguna":
-            return ""
-
-        # ✅ Validación opcional: solo letras y espacios (sin números ni símbolos)
-        if not ciudad.replace(" ", "").isalpha():
-            return ""
-
-        return ciudad.title()  # → Formato correcto, por ejemplo: "Pereira"
+        ciudad = respuesta.choices[0].message.content.strip()
+        return ciudad if ciudad.lower() != "ninguna" else ""
 
     except Exception as e:
         logging.error(f"❌ Error en detectar_ciudad(): {e}")
         return ""
-
 
 
 
@@ -2166,8 +2156,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
                 "me encantaron", "esos", "esas", "ese", "esa"
             }
- 
-            
             if (
                 any(pal in texto_normalizado for pal in afirmaciones) and
                 not any(pal in texto_normalizado for pal in faq_palabras)
@@ -2180,18 +2168,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             re.search(r"talla\s+\d{1,2}", texto_normalizado)
         ):
             est["modelo"] = modelos[0]
-        # 🧠 Si hay una sola imagen y el usuario pregunta por talla → asumir modelo automáticamente
-        if len(modelos) == 1 and re.search(r"talla\s+\d{1,2}", texto_normalizado):
-            est["modelo"] = modelos[0]
-
-        # 🧠 Si hay varias imágenes y pregunta por talla pero no dice cuál
-        elif len(modelos) > 1 and re.search(r"talla\s+\d{1,2}", texto_normalizado):
-            await ctx.bot.send_message(
-                cid,
-                "✅ ¡Claro que sí! 👟 ¿Podrías enviarme la *referencia del modelo* que te interesa para confirmar la talla? 📋✨",
-                parse_mode="Markdown"
-            )
-            return
 
         # 4️⃣ Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
@@ -2865,25 +2841,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "direccion": direccion
             })
 
-        # 🛠 Buscar precio en inventario con seguridad
-        marca  = normalize(est.get("marca", ""))
-        modelo = normalize(est.get("modelo", ""))
-        color  = normalize(est.get("color", ""))
-
-        item = next(
-            (i for i in inv
-             if normalize(i["marca"]) == marca and
-                normalize(i["modelo"]) == modelo and
-                normalize(i["color"]) == color),
+        precio = next(
+            (i["precio"] for i in inv
+             if normalize(i["marca"]) == normalize(est.get("marca", ""))
+             and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
+             and normalize(i["color"])  == normalize(est.get("color", ""))),
             None
         )
-
-        if item and "precio" in item:
-            est["precio_total"] = int(item["precio"])
-        else:
-            est["precio_total"] = 0
-            logging.warning(f"⚠️ No se encontró precio para: marca='{marca}', modelo='{modelo}', color='{color}'")
-
+        est["precio_total"] = int(precio) if precio else 0
         est["sale_id"] = generate_sale_id()
 
         est["resumen"] = {
@@ -4008,8 +3973,20 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def responder_con_openai(mensaje_usuario):
     try:
+        match_presentacion = re.search(
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s*(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+            mensaje_usuario.lower()
+        )
+        if match_presentacion:
+            nombre = match_presentacion.group(1).strip().title()
+            ciudad = match_presentacion.group(2).strip().title()
+            return (
+                f"👋 ¡Hola *{nombre}*! Bienvenido a X100.\n"
+                f"📍 Para *{ciudad}* el envío es *completamente gratis* 🚚✨"
+            )
+
         respuesta = await client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o",  # ✅ modelo mini actualizado
             messages=[
                 {
                     "role": "system",
@@ -4302,14 +4279,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
-    # 🧑‍💬 Detectar presentación tipo "soy Juan de Pereira"
-    respuesta_presentacion = await responder_con_openai(texto)
-    if respuesta_presentacion:
-        return {
-            "type": "text",
-            "text": respuesta_presentacion,
-            "parse_mode": "Markdown"
-        }
 
     # 🧠 Detectar ciudad (usando GPT con modelo 4o mini)
     ciudad = await detectar_ciudad(texto, client)
