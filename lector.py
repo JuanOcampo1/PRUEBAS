@@ -3000,6 +3000,94 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+    # 👟 Elegir talla (texto directo o confirmación de lengüeta)
+    if est.get("fase") == "esperando_talla":
+        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
+        if isinstance(tallas, (int, float, str)):
+            tallas = [str(tallas)]
+
+        # 🟢 1. Si ya hay una talla detectada (por imagen) y cliente confirma con "sí"
+        if est.get("talla") and any(p in txt for p in ("sí", "si", "s", "dale", "claro", "continuar", "comprar", "vamos")):
+            talla_detectada = est["talla"]
+
+        # 🟡 2. Si escribió la talla manualmente
+        else:
+            talla_detectada = detectar_talla(txt_raw, tallas)
+
+        if talla_detectada:
+            est["talla"] = talla_detectada
+
+            # 🔍 Ver si ya hay memoria del cliente
+            cliente = obtener_datos_cliente(numero)
+
+            if cliente:
+                nombre    = cliente.get("nombre", "cliente")
+                correo    = cliente.get("correo", "No registrado")
+                telefono  = cliente.get("telefono", numero)
+                cedula    = cliente.get("cedula", "No registrada")
+                ciudad    = cliente.get("ciudad", "No registrada")
+                provincia = cliente.get("provincia", "No registrada")
+                direccion = cliente.get("direccion", "No registrada")
+
+                est.update({
+                    "nombre": nombre,
+                    "correo": correo,
+                    "telefono": telefono,
+                    "cedula": cedula,
+                    "ciudad": ciudad,
+                    "provincia": provincia,
+                    "direccion": direccion
+                })
+
+                precio = next(
+                    (i["precio"] for i in inv
+                     if normalize(i["marca"]) == normalize(est["marca"])
+                     and normalize(i["modelo"]) == normalize(est["modelo"])
+                     and normalize(i["color"]) == normalize(est["color"])),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else 0
+                est["sale_id"] = generate_sale_id()
+
+                resumen = (
+                    f"✅ Pedido: {est['sale_id']}\n"
+                    f"👤Nombre: {nombre}\n"
+                    f"📧Correo: {correo}\n"
+                    f"📱Celular: {telefono}\n"
+                    f"🪪Cédula: {cedula}\n"
+                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
+                )
+
+                est["fase"] = "confirmar_datos_guardados"
+                estado_usuario[cid] = est
+                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+                return
+
+            # 🧾 No hay cliente guardado → continuar normal
+            est["fase"] = "esperando_nombre"
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Tu nombre completo para el pedido?",
+                parse_mode="Markdown"
+            )
+            return
+
+        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
 
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
@@ -3146,20 +3234,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
         return
-
-
-
-    # ✏️ Nombre del cliente
-    if est.get("fase") == "esperando_nombre":
-        est["nombre"] = txt_raw
-        est["fase"] = "esperando_correo"
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="¿Cuál es tu correo electrónico? 📧",
-            parse_mode="Markdown"
-        )
-        return
-
 
 
     # ✏️ Nombre del cliente
