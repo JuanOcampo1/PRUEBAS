@@ -1,4 +1,3 @@
-MIERDA
 # ——— Librerías estándar de Python ———
 import os
 import io
