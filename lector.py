@@ -2114,41 +2114,69 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "text": "❌ Aún no tengo registrado el precio exacto para ese modelo. ¿Te gustaría que lo consulte por ti?"
                 }
 
-      # ─────────────────────────────────────────────────────────────
+     # ──────────────────────────────────────────────────────────────
     # BLOQUE PRINCIPAL (§ Detecta color → muestra modelos → pregunta talla)
-    # ─────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────
     # 🎨 1) El cliente menciona un color (p.e. “me gustaron los amarillos”)
     if detectar_color(txt) and est.get("fase") not in {"esperando_modelo_elegido", "esperando_talla"}:
         color = detectar_color(txt)
         await manejar_color_detectado(ctx, cid, color, inv)    # 👈 usa nueva función
         return
 
-
-    # ── 2) Cliente responde después de ver las imágenes ─────────
     if est.get("fase") == "esperando_modelo_elegido":
         modelos = est.get("modelos_enviados", [])
         texto_normalizado = normalize(texto)
+
+        # 🚀 FLUJO DIRECTO: Solo un modelo y pregunta talla = pide lengüeta de una
+        if len(modelos) == 1 and (m := re.search(r"talla\s*\d{1,2}", texto_normalizado)):
+            est["modelo"] = modelos[0]
+            est["talla"] = m.group(1)
+            # --- GUARDAR PRECIO ---
+            marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
+            est.update({"marca": marca, "color": color_archivo})
+            if (item := buscar_item(inv, marca, modelo, color_archivo)):
+                est["precio_total"] = int(item["precio"])
+            # ----------------------
+            est["fase"] = "esperando_talla"  # o "esperando_lengueta"
+            estado_usuario[cid] = est
+
+            ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta_ejemplo):
+                with open(ruta_ejemplo, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"✅ ¡Claro que tenemos talla {est['talla']}! "
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* del zapato que usas normalmente 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
+                }
+            # Si no hay imagen de ejemplo:
+            return {
+                "type": "text",
+                "text": (
+                    f"✅ ¡Claro que tenemos talla {est['talla']}! "
+                    "📸 Para confirmar la medida exacta, mándame una foto de la lengüeta del zapato que usas normalmente 👟."
+                ),
+                "parse_mode": "Markdown"
+            }
 
         # Palabras FAQ para no confundir con “sí”
         faq_palabras = {
             "envio", "pago", "garantia", "talla", "tallas",
             "ubicacion", "donde", "horma", "precio", "costos"
         }
-
-        # NEW ▸― Detectar si pregunta talla antes de elegir modelo (≥2 modelos)
-        if (
-            len(modelos) > 1 and
-            (m := re.search(r"talla\s+(\d{1,2})", texto_normalizado))
-        ):
-            est["talla"] = m.group(1)                # guardamos la talla
-            estado_usuario[cid] = est
-            await ctx.bot.send_message(
-                cid,
-                f"✅ ¡Claro que tenemos talla *{m.group(1)}*! "
-                "Dime cuál de los modelos te gustó (ej. *304*).",
-                parse_mode="Markdown"
-            )
-            return
 
         # 1️⃣ Referencia numérica (ej. 305)
         if (m := re.search(r"\b(\d{3})\b", texto)):
@@ -2233,7 +2261,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["precio_total"] = int(item["precio"])
 
         # Cambiamos fase y persistimos
-        est["fase"] = "esperando_talla"           # (misma fase usada para recibir lengüeta)
+        est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
 
         # 🔁 Solicitar foto de lengüeta
@@ -2270,6 +2298,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             "parse_mode": "Markdown"
         }
+
 
 
     # ─────────────────────────────────────────────
@@ -2976,20 +3005,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
         if est.get("confirmacion_pendiente"):
-            if any(p in txt.lower() for p in ("si", "sí", "correcto", "ok", "listo", "vale", "dale", "todo bien", "todo correcto", "está bien", "esta bien")):
+            if any(p in txt.lower() for p in (
+                "si", "sí", "correcto", "ok", "listo", "vale", "dale",
+                "todo bien", "todo correcto", "está bien", "esta bien"
+            )):
                 est["confirmacion_pendiente"] = False
                 est["fase"] = "esperando_pago"
 
-                # Asegurar precio si no estaba
-                if est.get("precio_total", 0) == 0:
-                    precio = next(
-                        (i["precio"] for i in inv
-                         if normalize(i["marca"]) == normalize(est.get("marca", ""))
-                         and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
-                         and normalize(i["color"]) == normalize(est.get("color", ""))),
-                        None
-                    )
-                    est["precio_total"] = int(precio) if precio else 0
+                # 🔒 SIEMPRE recalcula el precio según lo último seleccionado
+                precio = next(
+                    (i["precio"] for i in inv
+                     if normalize(i["marca"]) == normalize(est.get("marca", ""))
+                     and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
+                     and normalize(i["color"]) == normalize(est.get("color", ""))),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else 0
 
                 precio = est.get("precio_total", 0)
                 est["sale_id"] = est.get("sale_id") or generate_sale_id()
@@ -3016,11 +3047,17 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
                     f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
                     f"💲Valor a pagar: {precio:,} COP\n\n"
-                    "¿Cómo deseas hacer el pago?\n"
-                    "• 💸 *Contraentrega*: adelanta 30 000 COP (se descuenta del total).\n"
-                    "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
-                    "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
-                    "Escribe *Transferencia*, *Contraentrega* o *Addi*."
+                    "😊 Tenemos *4 formas de pago* 💰\n\n"
+                    "1. 💵 *Pago anticipado* (Nequi, Daviplata, Bancolombia):\n"
+                    "   Pagas el valor completo antes del envío y tu compra queda asegurada 🚀.\n\n"
+                    "2. ✈️ *Pago contra entrega*:\n"
+                    "   Haces un abono de *$30.000* y el restante lo pagas a la transportadora al recibir tu calzado.\n\n"
+                    "3. 💳 *Tarjeta de crédito*:\n"
+                    "   Paga online con tu tarjeta desde el enlace que te enviamos (Visa, MasterCard, etc.).\n\n"
+                    "4. 💙 *Crédito a cuotas por medio de Addi*:\n"
+                    "   Financia tu compra y paga en cuotas mensuales de forma fácil y rápida.\n\n"
+                    "🤩 ¿Por cuál medio te queda más fácil hacer el pago?\n"
+                    "Escribe: *Pago anticipado*, *Contraentrega*, *Tarjeta* o *Addi*."
                 )
                 await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
                 estado_usuario[cid] = est
@@ -3033,6 +3070,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
                 return
+
+
 
         # B) Detectar qué campo desea cambiar
         campos = {
@@ -3276,11 +3315,17 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["fase"] = "esperando_metodo_bucaramanga"
         else:
             msg += (
-                "¿Cómo deseas hacer el pago?\n"
-                "• 💸 *Contraentrega*: adelanta 30 000 COP (se descuenta del total).\n"
-                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
-                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
-                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
+                "😊 Tenemos *4 formas de pago* 💰\n\n"
+                "1. 💵 *Pago anticipado* (Nequi, Daviplata, Bancolombia):\n"
+                "   Pagas el valor completo antes del envío y tu compra queda asegurada 🚀.\n\n"
+                "2. ✈️ *Pago contra entrega*:\n"
+                "   Haces un abono de *$30.000* y el restante lo pagas a la transportadora al recibir tu calzado.\n\n"
+                "3. 💳 *Tarjeta de crédito*:\n"
+                "   Paga online con tu tarjeta desde el enlace que te enviamos (Visa, MasterCard, etc.).\n\n"
+                "4. 💙 *Crédito a cuotas por medio de Addi*:\n"
+                "   Financia tu compra y paga en cuotas mensuales de forma fácil y rápida.\n\n"
+                "🤩 ¿Por cuál medio te queda más fácil hacer el pago?\n"
+                "Escribe: *Pago anticipado*, *Contraentrega*, *Tarjeta* o *Addi*."
             )
             est["fase"] = "esperando_pago"
 
@@ -3288,14 +3333,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
         return
 
+
     # ────────────────────────────────────────────────
     # 💳 MÉTODO DE PAGO – ELECCIÓN
     # ────────────────────────────────────────────────
     if est.get("fase") == "esperando_pago":
         opciones = {
-            "transferencia": ["transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr"],
-            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"],
-            "addi": ["addi", "pagar con addi", "credito", "crédito", "financiacion", "financiación"]
+            "transferencia": [
+                "transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr",
+                "nequi", "davivienda", "daviplata", "bancolombia", "pse"
+            ],
+            "contraentrega": [
+                "contraentrega", "contra entrega", "contra", "contrapago"
+            ],
+            "addi": [
+                "addi", "pagar con addi", "credito", "crédito", "financiacion", "financiación"
+            ],
+            "tarjeta": [
+                "tarjeta", "tarjeta de credito", "tarjeta de crédito", "pago con tarjeta", "visa", "mastercard"
+            ]
         }
         txt_normalizado = normalize(txt_raw)
         metodo_detectado = None
@@ -3307,7 +3363,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 Dime porfa como deseas pagar *transferencia*, *contraentrega* o *Addi* 😊",
+                text="💳 Dime porfa cómo deseas pagar: *pago anticipado*, *transferencia*, *nequi*, *daviplata*, *bancolombia*, *tarjeta*, *contraentrega* o *Addi* 😊",
                 parse_mode="Markdown"
             )
             return
@@ -3329,14 +3385,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             estado_usuario[cid] = est
             msg = (
-                "🟢 Elegiste *TRANSFERENCIA*.\n\n"
+                "🟢 Elegiste *Pago anticipado* (Nequi, Daviplata, Bancolombia, Davivienda).\n\n"
                 f"💰 Valor original: {precio_original:,} COP\n"
                 f"🎉 Descuento 5 %: -{descuento:,} COP\n"
                 f"✅ Total a pagar: {valor_final:,} COP\n\n"
                 "💳 Cuentas:\n"
                 "- Bancolombia 30300002233 (X100 SAS)\n"
                 "- Nequi 317 717 1171\n"
-                "- Daviplata 300 414 1021\n\n"
+                "- Daviplata 300 414 1021\n"
+                "- Davivienda 0066000000 (ejemplo)\n\n"
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
@@ -3357,7 +3414,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "💳 Cuentas:\n"
                 "- Bancolombia 30300002233 (X100 SAS)\n"
                 "- Nequi 317 717 1171\n"
-                "- Daviplata 300 414 1021\n\n"
+                "- Daviplata 300 414 1021\n"
+                "- Davivienda 0066000000 (ejemplo)\n\n"
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
@@ -3385,6 +3443,24 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             return   # ← nada más se procesa en esta vuelta
+
+        elif metodo_detectado == "tarjeta":
+            est["fase"] = "esperando_comprobante"
+            est["metodo_pago"] = "Tarjeta"
+            resumen.update({
+                "Pago": "Tarjeta de crédito",
+                "Valor": precio_original
+            })
+
+            estado_usuario[cid] = est
+            msg = (
+                "💳 Elegiste *tarjeta de crédito*.\n\n"
+                f"💰 Valor a pagar: {precio_original:,} COP\n\n"
+                "Te enviaré un enlace para pagar con tu tarjeta Visa, MasterCard o similar.\n"
+                "Avísame si tienes alguna preferencia o requieres ayuda con el proceso."
+            )
+            await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+            return
 
 
     # ────────────────────────────────────────────────────────────────
@@ -3461,11 +3537,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
             )
             return
-
-
-
-
-
 
 
     # 📸 Recibir comprobante de pago
