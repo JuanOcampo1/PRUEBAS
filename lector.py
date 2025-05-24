@@ -3011,15 +3011,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 est["confirmacion_pendiente"] = False
                 est["fase"] = "esperando_pago"
 
-                # 🔒 SIEMPRE recalcula el precio según lo último seleccionado
-                precio = next(
-                    (i["precio"] for i in inv
-                     if normalize(i["marca"]) == normalize(est.get("marca", ""))
-                     and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
-                     and normalize(i["color"]) == normalize(est.get("color", ""))),
-                    None
-                )
-                est["precio_total"] = int(precio) if precio else 0
+                # 🛠 Verificar datos antes de buscar precio
+                marca  = normalize(est.get("marca", ""))
+                modelo = normalize(est.get("modelo", ""))
+                color  = normalize(est.get("color", ""))
+
+                if marca and modelo and color:
+                    precio = next(
+                        (i["precio"] for i in inv
+                         if normalize(i["marca"]) == marca
+                         and normalize(i["modelo"]) == modelo
+                         and normalize(i["color"]) == color),
+                        0
+                    )
+                    est["precio_total"] = int(precio)
+                else:
+                    logging.warning(f"⚠️ No se pudo calcular el precio — Datos incompletos: marca={marca}, modelo={modelo}, color={color}")
+                    est["precio_total"] = 0
 
                 precio = est.get("precio_total", 0)
                 est["sale_id"] = est.get("sale_id") or generate_sale_id()
@@ -3062,13 +3070,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 estado_usuario[cid] = est
                 return
             else:
-                # ❌ El usuario aún no confirmó: mantenemos la fase igual
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text="¿Si los datos están correctos? ✅\nDime que *sí* y continuamos con la compra o dime qué campo deseas actualizar (nombre, ciudad, etc.)",
                     parse_mode="Markdown"
                 )
                 return
+
 
 
 
@@ -4639,6 +4647,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         bienvenida = await enviar_welcome_venom(cid)
         bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
 
+        # Separar audio del resto
+        audio_msg = next((m for m in bienvenida_msgs if m.get("type") == "audio"), None)
+        otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
+
         try:
             # 2. Cargar videos desde disco
             carpeta = "/var/data/videos"
@@ -4677,11 +4689,15 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 })
                 videos.append({
                     "type": "text",
-                    "text": "🧐 Dime que referencia te interesa, si no esta aca enviame una?"
+                    "text": "🧐 Dime qué referencia te interesa. Si no está acá, envíame una foto 📸"
                 })
 
-            # 4. Enviar primero los videos, luego bienvenida
-            mensajes = videos + bienvenida_msgs
+            # 4. Armar mensajes en orden: audio → videos → textos (catálogo, nombre)
+            mensajes = []
+            if audio_msg:
+                mensajes.append(audio_msg)
+            mensajes.extend(videos)
+            mensajes.extend(otros_msgs)
 
             return {"type": "multi", "messages": mensajes}
 
@@ -4691,6 +4707,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
+
 
 
     # 🔊 Petición de audio
