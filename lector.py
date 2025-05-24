@@ -2218,6 +2218,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
 
+        # 🚨 Verifica que el modelo sí está definido antes de usarlo
+        if not est.get("modelo"):
+            await ctx.bot.send_message(
+                cid,
+                "❓ Dime cuál referencia te gustó (ej. *305*) o confírmame diciendo 'me gusta ese'."
+            )
+            return
+
         # 📦  Guardar precio exacto del modelo elegido
         marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
         est.update({"marca": marca, "color": color_archivo})
@@ -4360,7 +4368,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "type": "text",
             "text": (
                 "🚚 *¡Claro que sí! Hacemos envíos a todo Colombia 🇨🇴*, incluyendo tu ciudad.\n\n"
-                "📦 El envío es totalmente *GRATIS* y te llega en promedio en *2 a 3 días hábiles* 📬.\n"
+                "📦 El envío es totalmente *GRATIS* y te llega en promedio en *2  días hábiles* 📬.\n"
                 "Puedes pagar contraentrega o por transferencia como prefieras 💳💵."
             ),
             "parse_mode": "Markdown"
