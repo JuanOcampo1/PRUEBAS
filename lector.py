@@ -2033,9 +2033,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             try:
                 path = os.path.join(ruta, archivo)
                 modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
+                
                 partes = modelo_raw.split(maxsplit=2)
                 if len(partes) == 3:
                     marca, modelo, color_archivo = partes
+                    est["marca"] = marca
                 else:
                     marca = modelo = color_archivo = ""
 
@@ -2770,9 +2772,72 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 👟 Evitar repetir análisis de talla si ya tenemos la talla definida
     if est.get("fase") == "esperando_talla" and est.get("talla"):
-        est["fase"] = "confirmar_datos_guardados"
+        cliente = obtener_datos_cliente(numero)
 
-    # 👟 Elegir talla (funciona igual que imagen_detectada: confirma y pide lengüeta)
+        if cliente:
+            nombre    = cliente.get("nombre", "cliente")
+            correo    = cliente.get("correo", "No registrado")
+            telefono  = cliente.get("telefono", numero)
+            cedula    = cliente.get("cedula", "No registrada")
+            ciudad    = cliente.get("ciudad", "No registrada")
+            provincia = cliente.get("provincia", "No registrada")
+            direccion = cliente.get("direccion", "No registrada")
+
+            est.update({
+                "nombre": nombre,
+                "correo": correo,
+                "telefono": telefono,
+                "cedula": cedula,
+                "ciudad": ciudad,
+                "provincia": provincia,
+                "direccion": direccion
+            })
+
+        precio = next(
+            (i["precio"] for i in inv
+             if normalize(i["marca"]) == normalize(est.get("marca", ""))
+             and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
+             and normalize(i["color"])  == normalize(est.get("color", ""))),
+            None
+        )
+        est["precio_total"] = int(precio) if precio else 0
+        est["sale_id"] = generate_sale_id()
+
+        est["resumen"] = {
+            "Número Venta": est["sale_id"],
+            "Fecha Venta": datetime.now().isoformat(),
+            "Cliente": est.get("nombre", "cliente"),
+            "Teléfono": est.get("telefono"),
+            "Cédula": est.get("cedula"),
+            "Producto": est.get("modelo"),
+            "Color": est.get("color"),
+            "Talla": est.get("talla"),
+            "Correo": est.get("correo"),
+            "Pago": None,
+            "Estado": "PENDIENTE"
+        }
+
+        resumen_msg = (
+            f"✅ Pedido: {est['sale_id']}\n"
+            f"👤Nombre: {est.get('nombre')}\n"
+            f"📧Correo: {est.get('correo')}\n"
+            f"📱Celular: {est.get('telefono')}\n"
+            f"🪪Cédula: {est.get('cedula')}\n"
+            f"📍Dirección: {est.get('direccion')}, {est.get('ciudad')}, {est.get('provincia')}\n"
+            f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+            f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+            "¿Estos datos siguen siendo correctos o deseas cambiar algo?\n"
+            "• Responde *sí* si todo está bien.\n"
+            "• O dime el campo a cambiar (nombre, correo, teléfono, etc.)."
+        )
+
+        est["fase"] = "confirmar_datos_guardados"
+        est["confirmacion_pendiente"] = True
+        estado_usuario[cid] = est
+        await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
+        return
+
+    # 👟 Elegir talla escrita (y pedir lengüeta)
     if est.get("fase") == "esperando_talla":
         tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
         if isinstance(tallas_disponibles, (int, float, str)):
@@ -2787,83 +2852,40 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if coincidencias:
             talla_detectada = tallas_normalizadas[coincidencias[0]]
             est["talla"] = talla_detectada
+            estado_usuario[cid] = est
 
-            # 🔍 Ver si ya hay memoria del cliente
-            cliente = obtener_datos_cliente(numero)
-
-            if cliente:
-                nombre    = cliente.get("nombre", "cliente")
-                correo    = cliente.get("correo", "No registrado")
-                telefono  = cliente.get("telefono", numero)
-                cedula    = cliente.get("cedula", "No registrada")
-                ciudad    = cliente.get("ciudad", "No registrada")
-                provincia = cliente.get("provincia", "No registrada")
-                direccion = cliente.get("direccion", "No registrada")
-
-                est.update({
-                    "nombre": nombre,
-                    "correo": correo,
-                    "telefono": telefono,
-                    "cedula": cedula,
-                    "ciudad": ciudad,
-                    "provincia": provincia,
-                    "direccion": direccion
-                })
-
-                # ── Precio y sale_id ──────────────────────────────
-                precio = next(
-                    (i["precio"] for i in inv
-                     if normalize(i["marca"]) == normalize(est["marca"])
-                     and normalize(i["modelo"]) == normalize(est["modelo"])
-                     and normalize(i["color"]) == normalize(est["color"])),
-                    None
-                )
-                est["precio_total"] = int(precio) if precio else 0
-                est["sale_id"] = generate_sale_id()
-
-                # ── Guardar RESUMEN dict ─────────────────────────
-                est["resumen"] = {
-                    "Número Venta": est["sale_id"],
-                    "Fecha Venta":  datetime.now().isoformat(),
-                    "Cliente":      nombre,
-                    "Teléfono":     telefono,
-                    "Cédula":       cedula,
-                    "Producto":     est["modelo"],
-                    "Color":        est["color"],
-                    "Talla":        est["talla"],
-                    "Correo":       correo,
-                    "Pago":         None,
-                    "Estado":       "PENDIENTE"
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"✅ ¡Claro que tenemos talla {talla_detectada}! "
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                "del zapato que usas normalmente 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
                 }
 
-                resumen_msg = (
-                    f"✅ Pedido: {est['sale_id']}\n"
-                    f"👤Nombre: {nombre}\n"
-                    f"📧Correo: {correo}\n"
-                    f"📱Celular: {telefono}\n"
-                    f"🪪Cédula: {cedula}\n"
-                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
-                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?\n"
-                    "• Responde *sí* si todo está bien.\n"
-                    "• O dime el campo a cambiar (nombre, correo, teléfono, etc.)."
-                )
-
-                est["fase"] = "confirmar_datos_guardados"
-                estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
-                return
-
-            # 🧾 No hay cliente guardado → pedir nombre
-            est["fase"] = "esperando_nombre"
-            estado_usuario[cid] = est
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🤩Perfecto, para iniciar la orden de compra dime tu nombre completo",
-                parse_mode="Markdown"
-            )
-            return
+            return {
+                "type": "text",
+                "text": (
+                    f"✅ ¡Claro que tenemos talla {talla_detectada}! "
+                    "📸 Por favor mándame una foto de la lengüeta de tu zapato para asegurarnos de la talla correcta 👟."
+                ),
+                "parse_mode": "Markdown"
+            }
 
         # ❌ No entendió ninguna talla, mostrar disponibles
         tallas_str = "\n".join(f"- {t}" for t in tallas_disponibles)
@@ -2871,19 +2893,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             chat_id=cid,
             text=(
                 "⚠️ No entendí qué talla necesitas.\n\n"
-                f"👉 Las tallas disponibles para el modelo *{est.get('modelo')}* color *{est.get('color')}* son:\n\n"
-                f"{tallas_str}\n\n"
-                "¿Cuál deseas?"
             ),
             parse_mode="Markdown"
         )
         return
 
-
-
-
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
+        if est.get("confirmacion_pendiente"):
+            est["confirmacion_pendiente"] = False  # limpia la bandera
+            estado_usuario[cid] = est
+            return  # ⛔ no procesar el "sí" que llegó justo después del resumen
+
         if any(p in txt for p in (
             "todo bien", "todo correcto", "está bien", "esta bien",
             "correcto", "ok", "listo", "si", "sí", "vale", "dale"
@@ -2923,6 +2944,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
             estado_usuario[cid] = est
             return
+
 
 
         # B) Detectar qué campo desea cambiar
@@ -4191,6 +4213,18 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+    # 🛻 ¿Hacen envíos a X ciudad?
+    envio_lugar_match = re.search(
+        r"(hacen|realizan|tienen|env[ií]an|puedo comprar desde|env[ií]os a)\s+(a\s+)?([a-záéíóúñ\s]{3,})\??",
+        texto
+    )
+    if envio_lugar_match:
+        ciudad = envio_lugar_match.group(3).strip().title()
+        return {
+            "type": "text",
+            "text": f"🚚 ¡Claro! Hacemos envíos a *{ciudad}* y cualquier ciudad de Colombia sin costo. 📦",
+            "parse_mode": "Markdown"
+        }
 
     # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
     if "envio" in texto:
