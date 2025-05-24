@@ -2215,7 +2215,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if "modelo" not in est:
             await ctx.bot.send_message(
                 cid,
-                "❓ Dime cuál referencia te gustó (ej. *305*) o envíame la foto del modelo."
+                "❓ Dime cuál te gusto de las que te mande."
             )
             return
 
@@ -2249,7 +2249,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not est.get("modelo"):
             await ctx.bot.send_message(
                 cid,
-                "❓ Dime cuál referencia te gustó (ej. *305*) o confírmame diciendo 'me gusta ese'."
+                "❓ Dime cuál referencias te gusto de las que te mande'."
             )
             return
 
@@ -3186,7 +3186,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️Mandame un correo real porfavor.",
+                text="Mandame tu correo pa que sigamos con la compra😊.",
                 parse_mode="Markdown"
             )
         return
@@ -3844,6 +3844,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🔥 Fallback inteligente CORREGIDO con 4 espacios
 
+    # 🛑 Si ya se enviaron modelos, evitar fallback (cliente está en flujo activo)
+    if est.get("fase") == "esperando_modelo_elegido" or est.get("modelos_enviados"):
+        print("[🧠] Ignorando fallback porque ya hay modelos enviados.")
+        return
+
     # 1) Detectar palabras típicas primero (antes que IA)
     palabras_clave_flujo = [
         "catalogo", "catálogo", "ver catálogo", "ver catalogo",
@@ -3853,7 +3858,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "demora", "envío", "envio"
     ]
 
-    if any(palabra in txt for palabra in palabras_clave_flujo):
+    if any(p in txt for p in palabras_clave_flujo):
         await ctx.bot.send_message(
             chat_id=cid,
             text="📋 Parece que quieres hacer un pedido o consultar el catálogo. Usa las opciones disponibles 😉",
@@ -3893,6 +3898,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
         )
     return
+
 # ─────────────────────────────────────────
 # FUNCIÓN AUXILIAR – REANUDAR FASE ACTUAL
 # ─────────────────────────────────────────
@@ -4214,19 +4220,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # FAQ 1: ¿Cuánto demora el envío?
         if any(p in texto for p in (
-            "cuanto demora", "cuanto tarda", "cuanto se demora",
-            "en cuanto llega", "me llega rapido", "llegan rapido"
+                "cuanto demora", "cuanto tarda", "cuanto se demora",
+                "en cuanto llega", "me llega rapido", "llegan rapido",
+                "cuántos días", "cuanto se demoran", "días en llegar",
+                "si lo pido hoy", "si hago el pedido hoy", "si los pido hoy", "cuando me llegan"
         )):
             return {
                 "type": "text",
                 "text": (
                     "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
+                    "pero generalmente tarda *2 hábiles* en llegar.\n\n"
                     "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
                     "En ese caso aplica *pago anticipado* (no contra entrega)."
                 ),
                 "parse_mode": "Markdown"
             }
+
 
         # FAQ 2: ¿Pago contra entrega?
         if any(p in texto for p in (
@@ -4412,7 +4421,20 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             ),
             "parse_mode": "Markdown"
         }
-
+    # 2️⃣ Bucaramanga — pero preguntan por demora
+    if "bucaramanga" in texto and any(p in texto for p in (
+        "cuanto demora", "cuanto tarda", "cuanto se demora",
+        "en cuanto llega", "me llega rapido", "llegan rapido", 
+        "cuántos días", "días en llegar", "se demora en llegar"
+    )):
+        return {
+            "type": "text",
+            "text": (
+                "📦 ¡Como estamos ubicados en *Bucaramanga*! 😎\n\n"
+                "El pedido se te puede enviar ya mismo con un domiciliario pagas al recibir no tienes que dar anticipo 🚀."
+            ),
+            "parse_mode": "Markdown"
+        }
     # 2️⃣ 🚚 Cuánto cuesta el envío a... o ¿es gratis?
     if "envio" in texto:
         # 2A: ¿Cuánto cuesta el envío a...?
