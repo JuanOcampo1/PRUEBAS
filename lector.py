@@ -2114,30 +2114,32 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "text": "❌ Aún no tengo registrado el precio exacto para ese modelo. ¿Te gustaría que lo consulte por ti?"
                 }
 
-     # ──────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────
     # BLOQUE PRINCIPAL (§ Detecta color → muestra modelos → pregunta talla)
     # ──────────────────────────────────────────────────────────────
     # 🎨 1) El cliente menciona un color (p.e. “me gustaron los amarillos”)
     if detectar_color(txt) and est.get("fase") not in {"esperando_modelo_elegido", "esperando_talla"}:
         color = detectar_color(txt)
-        await manejar_color_detectado(ctx, cid, color, inv)    # 👈 usa nueva función
+        await manejar_color_detectado(ctx, cid, color, inv)
         return
 
+    # ── 2) Cliente responde después de ver las imágenes ─────────
     if est.get("fase") == "esperando_modelo_elegido":
         modelos = est.get("modelos_enviados", [])
         texto_normalizado = normalize(texto)
 
-        # 🚀 FLUJO DIRECTO: Solo un modelo y pregunta talla = pide lengüeta de una
+        # 🚀 FLUJO DIRECTO: un solo modelo + “talla X”  →  pide lengüeta
         if len(modelos) == 1 and (m := re.search(r"talla\s*\d{1,2}", texto_normalizado)):
             est["modelo"] = modelos[0]
             est["talla"] = m.group(1)
-            # --- GUARDAR PRECIO ---
+
+            # Guardar precio inmediato
             marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
             est.update({"marca": marca, "color": color_archivo})
             if (item := buscar_item(inv, marca, modelo, color_archivo)):
                 est["precio_total"] = int(item["precio"])
-            # ----------------------
-            est["fase"] = "esperando_talla"  # o "esperando_lengueta"
+
+            est["fase"] = "esperando_talla"        # fase que recolecta la foto de lengüeta
             estado_usuario[cid] = est
 
             ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
@@ -2151,7 +2153,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             "type": "text",
                             "text": (
                                 f"✅ ¡Claro que tenemos talla {est['talla']}! "
-                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* del zapato que usas normalmente 👟."
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                "del zapato que usas normalmente 👟."
                             ),
                             "parse_mode": "Markdown"
                         },
@@ -2162,7 +2165,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         }
                     ]
                 }
-            # Si no hay imagen de ejemplo:
+            # Si no hay imagen de ejemplo
             return {
                 "type": "text",
                 "text": (
@@ -2172,7 +2175,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "parse_mode": "Markdown"
             }
 
-        # Palabras FAQ para no confundir con “sí”
+        # ---------- Resto de tu lógica normal -------------------
         faq_palabras = {
             "envio", "pago", "garantia", "talla", "tallas",
             "ubicacion", "donde", "horma", "precio", "costos"
@@ -2199,17 +2202,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "me encantaron", "esos", "esas", "ese", "esa"
             }
             if (
-                any(pal in texto_normalizado for pal in afirmaciones) and
-                not any(pal in texto_normalizado for pal in faq_palabras)
+                any(p in texto_normalizado for p in afirmaciones) and
+                not any(p in texto_normalizado for p in faq_palabras)
             ):
                 est["modelo"] = modelos[0]
 
-        # 3️⃣ Pregunta directa por talla (una sola imagen)
-        elif (
-            len(modelos) == 1 and
-            re.search(r"talla\s+\d{1,2}", texto_normalizado)
-        ):
-            est["modelo"] = modelos[0]
+        # 3️⃣ Pregunta directa por talla (una sola imagen) — ya cubierta arriba
+        # --------------------------------------------------------------
 
         # 4️⃣ Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
@@ -2219,13 +2218,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # ------------------- Manejo de talla -------------------
+        # ---------------- Manejo de talla cuando ya hay modelo -----------
         match_talla_preg = re.search(
             r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado
         )
         match_talla = re.search(r"talla\s+(\d{1,2})", texto_normalizado)
 
-        # NEW ▸― Si la talla ya estaba guardada por el paso previo (varios modelos)
         if "talla" in est and est["talla"]:
             talla = est["talla"]
             mensaje_inicial = (
@@ -2246,7 +2244,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
 
-        # 🚨 Verifica que el modelo sí está definido antes de usarlo
+        # 🚨 Verifica el modelo
         if not est.get("modelo"):
             await ctx.bot.send_message(
                 cid,
@@ -2254,17 +2252,17 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 📦  Guardar precio exacto del modelo elegido
+        # 📦 Guardar o actualizar precio
         marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
         est.update({"marca": marca, "color": color_archivo})
         if (item := buscar_item(inv, marca, modelo, color_archivo)):
             est["precio_total"] = int(item["precio"])
 
-        # Cambiamos fase y persistimos
+        # Persistir y cambiar fase
         est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
 
-        # 🔁 Solicitar foto de lengüeta
+        # 🔁 Solicitar foto de lengüeta (si hay imagen ejemplo)
         ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
         if os.path.exists(ruta_ejemplo):
             with open(ruta_ejemplo, "rb") as f:
