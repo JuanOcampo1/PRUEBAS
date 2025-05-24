@@ -714,6 +714,33 @@ async def generar_audio_openai(texto: str,
         return None
 
 
+async def detectar_ciudad(texto: str, client) -> str:
+    """
+    Usa GPT-4o para detectar si hay una ciudad de Colombia en el mensaje.
+    Devuelve el nombre de la ciudad si la hay, o una cadena vacía si no.
+    """
+    prompt = (
+        f"El usuario dijo: '{texto}'. ¿Está mencionando alguna ciudad de Colombia relacionada con envío?"
+        " Si sí, responde solo con el nombre de la ciudad (como 'Medellín', 'Pereira', etc.). "
+        "Si no, responde únicamente con: 'ninguna'."
+    )
+
+    try:
+        respuesta = await client.chat.completions.create(
+            model="gpt-4o",  # ✅ modelo mini actual
+            messages=[
+                {"role": "system", "content": "Responde solo con el nombre de la ciudad o 'ninguna'."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        ciudad = respuesta.choices[0].message.content.strip()
+        return ciudad if ciudad.lower() != "ninguna" else ""
+
+    except Exception as e:
+        logging.error(f"❌ Error en detectar_ciudad(): {e}")
+        return ""
+
+
 
 
 # CLIP: cargar modelo una sola vez
@@ -3941,15 +3968,12 @@ nest_asyncio.apply()
 def wa_chat_id(wa_from: str) -> str:
     return re.sub(r"\D", "", wa_from)
 
-from openai import AsyncOpenAI
-
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def responder_con_openai(mensaje_usuario):
     try:
-        # 🔍 Detectar saludo tipo "soy Juan de Pereira"
         match_presentacion = re.search(
-            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{3,})\s*(?:de|desde)\s+([a-záéíóúñ\s]+)", 
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s*(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
             mensaje_usuario.lower()
         )
         if match_presentacion:
@@ -3960,9 +3984,8 @@ async def responder_con_openai(mensaje_usuario):
                 f"📍 Para *{ciudad}* el envío es *completamente gratis* 🚚✨"
             )
 
-        # 🔁 Si no hay saludo personalizado, ir con OpenAI
         respuesta = await client.chat.completions.create(
-            model="gpt-4-1106-preview",
+            model="gpt-4o",  # ✅ modelo mini actualizado
             messages=[
                 {
                     "role": "system",
@@ -3971,16 +3994,16 @@ async def responder_con_openai(mensaje_usuario):
                         "Solo vendemos nuestra propia marca *X100* (no manejamos marcas como Skechers, Adidas, Nike, etc.). "
                         "Nuestros productos son 100% colombianos y hechos en Bucaramanga.\n\n"
                         "Tu objetivo principal es:\n"
-                        "- Si preguntan por precio di, dime que referencia exacta buscas\n"
-                        "- Siempre que puedas pedir la referencia del teni\n"
-                        "- Pedir que envíe una imagen del zapato que busca 📸\n"
+                        "- Si preguntan por precio di, dime qué referencia exacta buscas.\n"
+                        "- Siempre que puedas, pide la referencia del teni.\n"
+                        "- Pide que envíe una imagen del zapato que busca 📸.\n"
                         "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
                         "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100 y todo es unisex.\n\n"
                         "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
                         "- '¿Me puedes enviar la referencia del modelo que te interesa? 📋✨'\n"
                         "- '¿Quieres enviarme una imagen para ayudarte mejor? 📸'\n\n"
                         "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
-                        "Actúa como un asesor de ventas que siempre busca ayudar al cliente y CERRAR la compra de manera rápida, amigable y eficiente."
+                        "Actúa como un asesor de ventas que siempre busca ayudar al cliente y cerrar la compra de manera rápida, amigable y eficiente."
                     )
                 },
                 {
@@ -3994,8 +4017,8 @@ async def responder_con_openai(mensaje_usuario):
         return respuesta.choices[0].message.content.strip()
 
     except Exception as e:
-        logging.error(f"Error al consultar OpenAI: {e}")
-        return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
+        logging.error(f"❌ Error al consultar OpenAI: {e}")
+        return "⚠️ Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
 
 
 # 🧭 Manejo del catálogo si el usuario lo menciona
@@ -4255,19 +4278,13 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
-    # 🛻 ¿Hacen envíos a X ciudad? (evita bloquear contraentrega)
-    if "contraentrega" not in texto:
-        envio_lugar_match = re.search(
-            r"(hacen|realizan|tienen|env[ií]an|puedo comprar desde|env[ií]os a)\s+(a\s+)?([a-záéíóúñ\s]{3,})\??",
-            texto
-        )
-        if envio_lugar_match:
-            ciudad = envio_lugar_match.group(3).strip().title()
-            return {
-                "type": "text",
-                "text": f"🚚 ¡Claro! Hacemos envíos a *{ciudad}* y cualquier ciudad de Colombia sin costo. 📦",
-                "parse_mode": "Markdown"
-            }
+    # 🧠 Detectar si el usuario habla de una ciudad (usando IA GPT)
+    if await es_una_ciudad(texto, client):
+        return {
+            "type": "text",
+            "text": "🚚 ¡Claro! Hacemos envíos a cualquier ciudad de Colombia sin costo. 📦",
+            "parse_mode": "Markdown"
+        }
 
 
     # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
@@ -4293,21 +4310,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-    # 🕒 ¿Cuánto demora en llegar a Bucaramanga? (respuesta exclusiva Bucaramanga)
-    if "bucaramanga" in texto:
-        demora_match = re.search(
-            r"(cu[aá]nto(?: tarda| demora| se demora| llega| demora en llegar| vale el envio).*(bucaramanga))",
-            texto
-        )
-        if demora_match:
-            return {
-                "type": "text",
-                "text": (
-                    "📦 Se te puede enviar *hoy mismo* y lo puedes *recoger en la tienda* 🏬 "
-                    "o te lo enviamos con un *domiciliario* y pagas al recibir 🛵💵."
-                ),
-                "parse_mode": "Markdown"
-            }
+    # 🏡 Cliente menciona que está en Bucaramanga o quiere envío allá
+    if "bucaramanga" in texto and any(p in texto for p in {
+        "envío", "envios", "envían", "enviar", "soy de", "estoy en", "pueden llevar", "puedo recoger", "recoger"
+    }):
+        return {
+            "type": "text",
+            "text": (
+                "📍 *¡Perfecto! Como eres de Bucaramanga, te podemos enviar hoy mismo el pedido con un domiciliario*, "
+                "y lo pagas al recibir 🛵💵.\n\n"
+                "🛍️ También puedes pasar a recogerlo directamente en nuestra tienda si prefieres.\n\n"
+                "📌 *Estamos en:* Barrio *San Miguel*, Calle 52 #16-74\n"
+                "🗺️ Google Maps: https://maps.google.com/?q=7.109500,-73.121597\n\n"
+                "🚚 ¡También hacemos envíos nacionales con Servientrega!"
+            ),
+            "parse_mode": "Markdown"
+        }
 
     # 💳 Métodos de pago — bloque universal
     if any(p in texto for p in (
