@@ -4279,30 +4279,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-    # 🧠 Detectar ciudad (usando GPT con modelo 4o mini)
-    ciudad = await detectar_ciudad(texto, client)
-    if ciudad:
-        if ciudad.lower() == "bucaramanga":
-            return {
-                "type": "text",
-                "text": (
-                    "📍 *¡Perfecto! Como eres de Bucaramanga, te podemos enviar hoy mismo el pedido con un domiciliario*, "
-                    "y lo pagas al recibir 🛵💵.\n\n"
-                    "🛍️ También puedes pasar a recogerlo directamente en nuestra tienda si prefieres.\n\n"
-                    "📌 *Estamos en:* Barrio *San Miguel*, Calle 52 #16-74\n"
-                    "🗺️ Google Maps: https://maps.google.com/?q=7.109500,-73.121597\n\n"
-                    "🚚 ¡También hacemos envíos nacionales con Servientrega!"
-                ),
-                "parse_mode": "Markdown"
-            }
-        else:
-            return {
-                "type": "text",
-                "text": f"🚚 ¡Claro que tenemos envío gratuito a *{ciudad.title()}*! 📦",
-                "parse_mode": "Markdown"
-            }
-
-
 
     # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
     if "envio" in texto:
