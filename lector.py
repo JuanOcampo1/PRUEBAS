@@ -2138,6 +2138,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "❓ Dime cuál referencia te gustó (ej. *305*) o envíame la foto del modelo."
             )
             return
+        # 📦 Buscar y guardar precio una vez definido el modelo
+        partes_modelo = est["modelo"].split(maxsplit=2)
+        if len(partes_modelo) == 3:
+            marca, modelo, color_archivo = partes_modelo
+            est["marca"] = marca
+            est["color"] = color_archivo
+
+            item = next(
+                (i for i in inv if
+                 normalize(i["marca"]) == normalize(marca) and
+                 normalize(i["modelo"]) == normalize(modelo) and
+                 normalize(i["color"]) == normalize(color_archivo)),
+                None
+            )
+            if item:
+                est["precio_total"] = int(item["precio"])
 
         # ------------------- Manejo de talla -------------------
         pregunta_talla = re.search(
