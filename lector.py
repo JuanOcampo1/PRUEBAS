@@ -1521,7 +1521,89 @@ async def manejar_imagen(update, ctx):
             text="❌ Hubo un error al procesar la imagen. ¿Puedes intentar de nuevo?",
             reply_markup=menu_botones(["Enviar otra imagen"])
         )
+# ─────────────────────────────────────────────────────────────
+# Ayudante: busca un producto exacto en el inventario
+# ─────────────────────────────────────────────────────────────
+def buscar_item(inv: list, marca: str, modelo: str, color: str):
+    """Devuelve el dict del ítem que coincide 100 % o None."""
+    for i in inv:
+        if (
+            normalize(i["marca"])  == normalize(marca)  and
+            normalize(i["modelo"]) == normalize(modelo) and
+            normalize(i["color"])  == normalize(color)
+        ):
+            return i
+    return None
 
+
+# ─────────────────────────────────────────────────────────────
+# Manejar mensajes tipo “me gustaron los amarillos”
+# ─────────────────────────────────────────────────────────────
+async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
+    ruta = "/var/data/modelos_video"
+    if not os.path.exists(ruta):
+        await ctx.bot.send_message(
+            cid,
+            "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde."
+        )
+        return
+
+    # Alias compatibles (amarillo → amarillo mostaza, etc.)
+    aliases = [color] + [k for k, v in color_aliases.items() if v == color]
+
+    # Archivos .jpg cuyo nombre contiene el color o su alias
+    coincidencias = [
+        f for f in os.listdir(ruta)
+        if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases)
+    ]
+    if not coincidencias:
+        await ctx.bot.send_message(
+            cid,
+            f"😕 No encontré modelos con color *{color.upper()}*."
+        )
+        return
+
+    modelos_enviados = []
+    for archivo in coincidencias:
+        try:
+            path = os.path.join(ruta, archivo)
+            modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
+            marca, modelo, color_archivo = (modelo_raw.split(maxsplit=2) + ["", "", ""])[:3]
+
+            # Precio exacto (marca + modelo + color)
+            item   = buscar_item(inventario, marca, modelo, color_archivo)
+            precio = f"{int(item['precio']):,} COP" if item else "Consultar"
+
+            caption = (
+                f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n"
+                f"💰 Precio: {precio}"
+            )
+            await ctx.bot.send_photo(
+                chat_id=cid,
+                photo=open(path, "rb"),
+                caption=caption,
+                parse_mode="Markdown"
+            )
+
+            modelos_enviados.append(modelo_raw)
+            if len(modelos_enviados) >= 4:          # máximo 4 imágenes
+                break
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando imagen: {e}")
+
+    # Guardar estado para el siguiente paso
+    estado_usuario[cid].update({
+        "color":            color,
+        "fase":             "esperando_modelo_elegido",
+        "modelos_enviados": modelos_enviados
+    })
+
+    await ctx.bot.send_message(
+        cid,
+        "🧐 Dime cuál te gustó. Si  no es ninguna, envíame una foto del modelo que quieres.",
+        parse_mode="Markdown"
+    )
 # ───────────────────────────────────────────────────────────────
 
 def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
@@ -2005,97 +2087,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "text": "❌ Aún no tengo registrado el precio exacto para ese modelo. ¿Te gustaría que lo consulte por ti?"
                 }
 
-    # 🎨 El cliente menciona un color (p.e. "me gustaron los amarillos")
-    if detectar_color(txt) and "modelos_enviados" not in est:
-        txt   = texto
+     # ─────────────────────────────────────────────────────────────
+    # BLOQUE PRINCIPAL (§ Detecta color → muestra modelos → pregunta talla)
+    # ─────────────────────────────────────────────────────────────
+    # 🎨 1) El cliente menciona un color (p.e. “me gustaron los amarillos”)
+    if detectar_color(txt) and est.get("fase") not in {"esperando_modelo_elegido", "esperando_talla"}:
         color = detectar_color(txt)
-
-
-        # ────────────────────────────────────────────────
-
-        # 📂 Buscar imágenes del color
-        ruta = "/var/data/modelos_video"
-        if not os.path.exists(ruta):
-            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
-            return
-
-        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
-        coincidencias = [
-            f for f in os.listdir(ruta)
-            if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases_del_color)
-        ]
-        if not coincidencias:
-            await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.") 
-            return
-
-        modelos_enviados = []
-        for archivo in coincidencias:
-            try:
-                path = os.path.join(ruta, archivo)
-                modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
-                
-                partes = modelo_raw.split(maxsplit=2)
-                if len(partes) == 3:
-                    marca, modelo, color_archivo = partes
-                    est["marca"] = marca
-                else:
-                    marca = modelo = color_archivo = ""
-
-                modelos_enviados.append(modelo_raw)
-
-                item = next(
-                    (i for i in inv if
-                     normalize(i["modelo"]) == normalize(modelo) and
-                     normalize(i["color"])  == normalize(color_archivo) and
-                     normalize(i["marca"])  == normalize(marca)),
-                    None
-                )
-                precio = f"{int(item['precio']):,} COP" if item else "Consultar"
-
-                caption = (
-                    f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n"
-                    f"💰 Precio: {precio}"
-                )
-                await ctx.bot.send_photo(
-                    chat_id=cid,
-                    photo=open(path, "rb"),
-                    caption=caption,
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logging.error(f"❌ Error enviando imagen: {e}")
-
-        # 🧠 Guardar estado tras mostrar imágenes
-        est["color"]            = color
-        est["fase"]             = "esperando_modelo_elegido"
-        est["modelos_enviados"] = modelos_enviados
-        estado_usuario[cid]     = est
-
-        await ctx.bot.send_message(
-            cid,
-            "🧐 Dime en cual estas interesado si no es ninguno enviame una foto del que quieres "
-            "o envíame una imagen del modelo que deseas.",
-            parse_mode="Markdown"
-        )
+        await manejar_color_detectado(ctx, cid, color, inv)    # 👈 usa nueva función
         return
 
 
-    # ── Cliente responde después de ver las imágenes ──
+    # ── 2) Cliente responde después de ver las imágenes ─────────
     if est.get("fase") == "esperando_modelo_elegido":
         modelos = est.get("modelos_enviados", [])
-        txt = texto
-        texto_normalizado = normalize(txt)
+        texto_normalizado = normalize(texto)
 
-        # Palabras que señalan FAQ (para no confundir con “sí”)
+        # Palabras FAQ para no confundir con “sí”
         faq_palabras = {
             "envio", "pago", "garantia", "talla", "tallas",
             "ubicacion", "donde", "horma", "precio", "costos"
         }
 
-        # 1️⃣  El cliente escribe número de referencia (ej. 305)
-        match_ref = re.search(r"\b(\d{3})\b", txt)
-        if match_ref:
-            ref = match_ref.group(1)
+        # 1️⃣ Referencia numérica (ej. 305)
+        if (m := re.search(r"\b(\d{3})\b", texto)):
+            ref = m.group(1)
             modelo_elegido = next((m for m in modelos if ref in m), None)
             if not modelo_elegido:
                 await ctx.bot.send_message(
@@ -2106,66 +2121,53 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             est["modelo"] = modelo_elegido
 
-        # 2️⃣  Una sola imagen + afirmación genérica, sin FAQ
+        # 2️⃣ Una sola imagen + afirmación genérica
         elif len(modelos) == 1:
-            afirmaciones = [
+            afirmaciones = {
                 "si", "sí", "sii", "sisas", "de una", "dale", "hágale", "hagale",
-                "me gustaron", "me llevo esos", "quiero comprar esos", "quiero esos", "quiero esas", "quiero ese",
-                "kiero esos", "kiero esas", "kiero ese", "quiero esoss", "quiero esaz", "quiero ezas",
-                "me llevo esos", "me llevo esas", "me levo esas", "me yevo esas", "si esos", "si esas",
-                "sii esos", "sii esas", "quiero", "lo quiero", "quiero", "quiero esas",
-                "me encantaron", "me parecen bonitos", "me parecieron buenos", "me gustaron esos",
-                "esos", "esas", "ese", "esa", "quiero ese modelo"
-            ]
+                "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
+                "me encantaron", "esos", "esas", "ese", "esa"
+            }
             if (
-                any(pal in texto_normalizado for pal in afirmaciones)
-                and not any(pal in texto_normalizado for pal in faq_palabras)
+                any(pal in texto_normalizado for pal in afirmaciones) and
+                not any(pal in texto_normalizado for pal in faq_palabras)
             ):
                 est["modelo"] = modelos[0]
 
-
-        # 3️⃣  Solo hay una imagen y el usuario pregunta por talla → asumirla
+        # 3️⃣ Pregunta directa por talla (una sola imagen)
         elif (
-            len(modelos) == 1
-            and re.search(r"talla\s+\d{1,2}", texto_normalizado)
+            len(modelos) == 1 and
+            re.search(r"talla\s+\d{1,2}", texto_normalizado)
         ):
             est["modelo"] = modelos[0]
 
-        # 4️⃣  Si aún no sabemos qué modelo eligió
+        # 4️⃣ Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
             await ctx.bot.send_message(
                 cid,
                 "❓ Dime cuál referencia te gustó (ej. *305*) o envíame la foto del modelo."
             )
             return
-        # 📦 Buscar y guardar precio una vez definido el modelo
-        partes_modelo = est["modelo"].split(maxsplit=2)
-        if len(partes_modelo) == 3:
-            marca, modelo, color_archivo = partes_modelo
-            est["marca"] = marca
-            est["color"] = color_archivo
 
-            item = next(
-                (i for i in inv if
-                 normalize(i["marca"]) == normalize(marca) and
-                 normalize(i["modelo"]) == normalize(modelo) and
-                 normalize(i["color"]) == normalize(color_archivo)),
-                None
-            )
-            if item:
-                est["precio_total"] = int(item["precio"])
+        # 📦  Guardar precio exacto del modelo elegido
+        marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
+        est.update({"marca": marca, "color": color_archivo})
+
+        if (item := buscar_item(inv, marca, modelo, color_archivo)):
+            est["precio_total"] = int(item["precio"])
 
         # ------------------- Manejo de talla -------------------
-        pregunta_talla = re.search(
-            r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado)
+        match_talla_preg = re.search(
+            r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado
+        )
         match_talla = re.search(r"talla\s+(\d{1,2})", texto_normalizado)
 
-        if pregunta_talla:
-            talla = pregunta_talla.group(2)
+        if match_talla_preg:
+            talla = match_talla_preg.group(2)
+            est["talla"] = talla
             mensaje_inicial = (
                 f"✅ ¡Claro que tenemos talla *{talla}* para el modelo *{est['modelo']}*!\n"
             )
-            est["talla"] = talla
         elif match_talla:
             talla = match_talla.group(1)
             est["talla"] = talla
@@ -2175,11 +2177,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
 
-        # Cambiamos fase
+        # Cambiamos fase y persistimos
         est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
 
-        #  🔁  Solicitar foto de lengüeta
+        # 🔁 Solicitar foto de lengüeta
         ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
         if os.path.exists(ruta_ejemplo):
             with open(ruta_ejemplo, "rb") as f:
@@ -2204,6 +2206,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]
             }
 
+        # Si no existe la imagen de ejemplo
         return {
             "type": "text",
             "text": (
@@ -2212,6 +2215,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             "parse_mode": "Markdown"
         }
+
 
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
@@ -4251,18 +4255,20 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
-    # 🛻 ¿Hacen envíos a X ciudad?
-    envio_lugar_match = re.search(
-        r"(hacen|realizan|tienen|env[ií]an|puedo comprar desde|env[ií]os a)\s+(a\s+)?([a-záéíóúñ\s]{3,})\??",
-        texto
-    )
-    if envio_lugar_match:
-        ciudad = envio_lugar_match.group(3).strip().title()
-        return {
-            "type": "text",
-            "text": f"🚚 ¡Claro! Hacemos envíos a *{ciudad}* y cualquier ciudad de Colombia sin costo. 📦",
-            "parse_mode": "Markdown"
-        }
+    # 🛻 ¿Hacen envíos a X ciudad? (evita bloquear contraentrega)
+    if "contraentrega" not in texto:
+        envio_lugar_match = re.search(
+            r"(hacen|realizan|tienen|env[ií]an|puedo comprar desde|env[ií]os a)\s+(a\s+)?([a-záéíóúñ\s]{3,})\??",
+            texto
+        )
+        if envio_lugar_match:
+            ciudad = envio_lugar_match.group(3).strip().title()
+            return {
+                "type": "text",
+                "text": f"🚚 ¡Claro! Hacemos envíos a *{ciudad}* y cualquier ciudad de Colombia sin costo. 📦",
+                "parse_mode": "Markdown"
+            }
+
 
     # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
     if "envio" in texto:
