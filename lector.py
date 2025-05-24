@@ -733,12 +733,23 @@ async def detectar_ciudad(texto: str, client) -> str:
                 {"role": "user", "content": prompt}
             ]
         )
-        ciudad = respuesta.choices[0].message.content.strip()
-        return ciudad if ciudad.lower() != "ninguna" else ""
+
+        ciudad = respuesta.choices[0].message.content.strip().lower().strip(".").strip()
+
+        # 🚫 Si la IA respondió "ninguna" o dejó vacío, no lo usamos
+        if not ciudad or ciudad == "ninguna":
+            return ""
+
+        # ✅ Validación opcional: solo letras y espacios (sin números ni símbolos)
+        if not ciudad.replace(" ", "").isalpha():
+            return ""
+
+        return ciudad.title()  # → Formato correcto, por ejemplo: "Pereira"
 
     except Exception as e:
         logging.error(f"❌ Error en detectar_ciudad(): {e}")
         return ""
+
 
 
 
@@ -2155,6 +2166,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
                 "me encantaron", "esos", "esas", "ese", "esa"
             }
+ 
+            
             if (
                 any(pal in texto_normalizado for pal in afirmaciones) and
                 not any(pal in texto_normalizado for pal in faq_palabras)
@@ -2167,6 +2180,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             re.search(r"talla\s+\d{1,2}", texto_normalizado)
         ):
             est["modelo"] = modelos[0]
+        # 🧠 Si hay una sola imagen y el usuario pregunta por talla → asumir modelo automáticamente
+        if len(modelos) == 1 and re.search(r"talla\s+\d{1,2}", texto_normalizado):
+            est["modelo"] = modelos[0]
+
+        # 🧠 Si hay varias imágenes y pregunta por talla pero no dice cuál
+        elif len(modelos) > 1 and re.search(r"talla\s+\d{1,2}", texto_normalizado):
+            await ctx.bot.send_message(
+                cid,
+                "✅ ¡Claro que sí! 👟 ¿Podrías enviarme la *referencia del modelo* que te interesa para confirmar la talla? 📋✨",
+                parse_mode="Markdown"
+            )
+            return
 
         # 4️⃣ Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
@@ -2840,14 +2865,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "direccion": direccion
             })
 
-        precio = next(
-            (i["precio"] for i in inv
-             if normalize(i["marca"]) == normalize(est.get("marca", ""))
-             and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
-             and normalize(i["color"])  == normalize(est.get("color", ""))),
+        # 🛠 Buscar precio en inventario con seguridad
+        marca  = normalize(est.get("marca", ""))
+        modelo = normalize(est.get("modelo", ""))
+        color  = normalize(est.get("color", ""))
+
+        item = next(
+            (i for i in inv
+             if normalize(i["marca"]) == marca and
+                normalize(i["modelo"]) == modelo and
+                normalize(i["color"]) == color),
             None
         )
-        est["precio_total"] = int(precio) if precio else 0
+
+        if item and "precio" in item:
+            est["precio_total"] = int(item["precio"])
+        else:
+            est["precio_total"] = 0
+            logging.warning(f"⚠️ No se encontró precio para: marca='{marca}', modelo='{modelo}', color='{color}'")
+
         est["sale_id"] = generate_sale_id()
 
         est["resumen"] = {
@@ -4278,6 +4314,15 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+    # 🧑‍💬 Detectar presentación tipo "soy Juan de Pereira"
+    respuesta_presentacion = await responder_con_openai(texto)
+    if respuesta_presentacion:
+        return {
+            "type": "text",
+            "text": respuesta_presentacion,
+            "parse_mode": "Markdown"
+        }
+
     # 🧠 Detectar ciudad (usando GPT con modelo 4o mini)
     ciudad = await detectar_ciudad(texto, client)
     if ciudad:
@@ -4478,7 +4523,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "Si no hay datos, responde con: {}"
             )
 
-            respuesta = await openai.chat.completions.create(
+            respuesta = await client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{ "role": "user", "content": prompt }],
                 temperature=0,
