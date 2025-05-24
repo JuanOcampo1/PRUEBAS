@@ -2892,7 +2892,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "⚠️ No entendí qué talla necesitas.\n\n"
+                "Mandame tu lengueta pa que confirmemos el pedido.\n\n"
             ),
             parse_mode="Markdown"
         )
@@ -2901,51 +2901,57 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
         if est.get("confirmacion_pendiente"):
-            est["confirmacion_pendiente"] = False  # limpia la bandera
+            est["confirmacion_pendiente"] = False
             estado_usuario[cid] = est
-            return  # ⛔ no procesar el "sí" que llegó justo después del resumen
+            if any(p in txt for p in ("si", "sí", "correcto", "ok", "listo", "vale", "dale", "todo bien", "todo correcto", "está bien", "esta bien")):
+                est["fase"] = "esperando_pago"
 
-        if any(p in txt for p in (
-            "todo bien", "todo correcto", "está bien", "esta bien",
-            "correcto", "ok", "listo", "si", "sí", "vale", "dale"
-        )):
-            est["fase"] = "esperando_pago"
-            precio = est.get("precio_total", 0)
-            est["sale_id"] = est.get("sale_id") or generate_sale_id()
+                # Asegurar precio si no estaba
+                if est.get("precio_total", 0) == 0:
+                    precio = next(
+                        (i["precio"] for i in inv
+                         if normalize(i["marca"]) == normalize(est.get("marca", ""))
+                         and normalize(i["modelo"]) == normalize(est.get("modelo", ""))
+                         and normalize(i["color"]) == normalize(est.get("color", ""))),
+                        None
+                    )
+                    est["precio_total"] = int(precio) if precio else 0
 
-            est["resumen"] = {
-                "Número Venta": est["sale_id"],
-                "Fecha Venta": datetime.now().isoformat(),
-                "Cliente": est.get("nombre"),
-                "Teléfono": est.get("telefono"),
-                "Cédula": est.get("cedula"),
-                "Producto": est.get("modelo"),
-                "Color": est.get("color"),
-                "Talla": est.get("talla"),
-                "Correo": est.get("correo"),
-                "Pago": None,
-                "Estado": "PENDIENTE"
-            }
+                precio = est.get("precio_total", 0)
+                est["sale_id"] = est.get("sale_id") or generate_sale_id()
 
-            msg = (
-                f"✅ Pedido: {est['sale_id']}\n"
-                f"👤Nombre: {est['nombre']}\n"
-                f"📧Correo: {est['correo']}\n"
-                f"📱Celular: {est['telefono']}\n"
-                f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-                f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                f"💲Valor a pagar: {precio:,} COP\n\n"
-                "¿Cómo deseas hacer el pago?\n"
-                "• 💸 *Contraentrega*: adelanta 30 000 COP (se descuenta del total).\n"
-                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
-                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
-                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
-            )
-            await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
-            estado_usuario[cid] = est
-            return
+                est["resumen"] = {
+                    "Número Venta": est["sale_id"],
+                    "Fecha Venta": datetime.now().isoformat(),
+                    "Cliente": est.get("nombre"),
+                    "Teléfono": est.get("telefono"),
+                    "Cédula": est.get("cedula"),
+                    "Producto": est.get("modelo"),
+                    "Color": est.get("color"),
+                    "Talla": est.get("talla"),
+                    "Correo": est.get("correo"),
+                    "Pago": None,
+                    "Estado": "PENDIENTE"
+                }
 
-
+                msg = (
+                    f"✅ Pedido: {est['sale_id']}\n"
+                    f"👤Nombre: {est['nombre']}\n"
+                    f"📧Correo: {est['correo']}\n"
+                    f"📱Celular: {est['telefono']}\n"
+                    f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                    f"💲Valor a pagar: {precio:,} COP\n\n"
+                    "¿Cómo deseas hacer el pago?\n"
+                    "• 💸 *Contraentrega*: adelanta 30 000 COP (se descuenta del total).\n"
+                    "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
+                    "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
+                    "Escribe *Transferencia*, *Contraentrega* o *Addi*."
+                )
+                await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+                estado_usuario[cid] = est
+                return
+            return  # no dijo "sí", simplemente ignoramos y esperamos otra entrada
 
         # B) Detectar qué campo desea cambiar
         campos = {
@@ -2974,6 +2980,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
 
     # 💾 Guardar nuevo valor editado
     if est.get("fase") == "editando_dato":
