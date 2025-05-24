@@ -2128,10 +2128,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         modelos = est.get("modelos_enviados", [])
         texto_normalizado = normalize(texto)
 
-        # 🚀 FLUJO DIRECTO: un solo modelo + “talla X”  →  pide lengüeta
-        if len(modelos) == 1 and (m := re.search(r"talla\s*\d{1,2}", texto_normalizado)):
+        # 🚀 FLUJO DIRECTO: un solo modelo + “talla X” → pide lengüeta
+        if len(modelos) == 1 and (m := re.search(r"talla\s*(\d{1,2})", texto_normalizado)):
             est["modelo"] = modelos[0]
-            est["talla"] = m.group(1)
+            est["talla"]  = m.group(1)
 
             # Guardar precio inmediato
             marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
@@ -2139,7 +2139,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if (item := buscar_item(inv, marca, modelo, color_archivo)):
                 est["precio_total"] = int(item["precio"])
 
-            est["fase"] = "esperando_talla"        # fase que recolecta la foto de lengüeta
+            est["fase"] = "esperando_talla"  # fase que pide la foto de lengüeta
             estado_usuario[cid] = est
 
             ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
@@ -2174,6 +2174,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 "parse_mode": "Markdown"
             }
+
 
         # ---------- Resto de tu lógica normal -------------------
         faq_palabras = {
