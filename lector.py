@@ -2114,7 +2114,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "text": "❌ Aún no tengo registrado el precio exacto para ese modelo. ¿Te gustaría que lo consulte por ti?"
                 }
 
-     # ─────────────────────────────────────────────────────────────
+      # ─────────────────────────────────────────────────────────────
     # BLOQUE PRINCIPAL (§ Detecta color → muestra modelos → pregunta talla)
     # ─────────────────────────────────────────────────────────────
     # 🎨 1) El cliente menciona un color (p.e. “me gustaron los amarillos”)
@@ -2134,6 +2134,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "envio", "pago", "garantia", "talla", "tallas",
             "ubicacion", "donde", "horma", "precio", "costos"
         }
+
+        # NEW ▸― Detectar si pregunta talla antes de elegir modelo (≥2 modelos)
+        if (
+            len(modelos) > 1 and
+            (m := re.search(r"talla\s+(\d{1,2})", texto_normalizado))
+        ):
+            est["talla"] = m.group(1)                # guardamos la talla
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(
+                cid,
+                f"✅ ¡Claro que tenemos talla *{m.group(1)}*! "
+                "Dime cuál de los modelos te gustó (ej. *304*).",
+                parse_mode="Markdown"
+            )
+            return
 
         # 1️⃣ Referencia numérica (ej. 305)
         if (m := re.search(r"\b(\d{3})\b", texto)):
@@ -2176,20 +2191,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 📦  Guardar precio exacto del modelo elegido
-        marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
-        est.update({"marca": marca, "color": color_archivo})
-
-        if (item := buscar_item(inv, marca, modelo, color_archivo)):
-            est["precio_total"] = int(item["precio"])
-
         # ------------------- Manejo de talla -------------------
         match_talla_preg = re.search(
             r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado
         )
         match_talla = re.search(r"talla\s+(\d{1,2})", texto_normalizado)
 
-        if match_talla_preg:
+        # NEW ▸― Si la talla ya estaba guardada por el paso previo (varios modelos)
+        if "talla" in est and est["talla"]:
+            talla = est["talla"]
+            mensaje_inicial = (
+                f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
+            )
+        elif match_talla_preg:
             talla = match_talla_preg.group(2)
             est["talla"] = talla
             mensaje_inicial = (
@@ -2204,8 +2218,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
 
+        # 📦  Guardar precio exacto del modelo elegido
+        marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
+        est.update({"marca": marca, "color": color_archivo})
+        if (item := buscar_item(inv, marca, modelo, color_archivo)):
+            est["precio_total"] = int(item["precio"])
+
         # Cambiamos fase y persistimos
-        est["fase"] = "esperando_talla"
+        est["fase"] = "esperando_talla"           # (misma fase usada para recibir lengüeta)
         estado_usuario[cid] = est
 
         # 🔁 Solicitar foto de lengüeta
@@ -2948,9 +2968,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
         if est.get("confirmacion_pendiente"):
-            est["confirmacion_pendiente"] = False
-            estado_usuario[cid] = est
-            if any(p in txt for p in ("si", "sí", "correcto", "ok", "listo", "vale", "dale", "todo bien", "todo correcto", "está bien", "esta bien")):
+            if any(p in txt.lower() for p in ("si", "sí", "correcto", "ok", "listo", "vale", "dale", "todo bien", "todo correcto", "está bien", "esta bien")):
+                est["confirmacion_pendiente"] = False
                 est["fase"] = "esperando_pago"
 
                 # Asegurar precio si no estaba
@@ -2998,7 +3017,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
                 estado_usuario[cid] = est
                 return
-            return  # no dijo "sí", simplemente ignoramos y esperamos otra entrada
+            else:
+                # ❌ El usuario aún no confirmó: mantenemos la fase igual
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="¿Si los datos están correctos? ✅\nDime que *sí* y continuamos con la compra o dime qué campo deseas actualizar (nombre, ciudad, etc.)",
+                    parse_mode="Markdown"
+                )
+                return
 
         # B) Detectar qué campo desea cambiar
         campos = {
@@ -3027,6 +3053,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
 
 
     # 💾 Guardar nuevo valor editado
@@ -4280,9 +4307,29 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
 
-    # 🚚 ¿Cuánto cuesta el envío a...? o ¿El envío es gratis?
+    texto = texto.lower()
+
+    # 1️⃣ 🏡 Bucaramanga — prioridad máxima si se menciona
+    if "bucaramanga" in texto and any(p in texto for p in {
+        "envío", "envios", "envían", "enviar", "envian", "enviarme", 
+        "soy de", "estoy en", "pueden llevar", "tienen envio a", "el envio a", 
+        "envío a", "envian a", "como es el envio", "hacen envíos", "tienen envío"
+    }):
+        return {
+            "type": "text",
+            "text": (
+                "📍 *¡Perfecto! Como eres de Bucaramanga, te podemos enviar hoy mismo el pedido con un domiciliario*, "
+                "y lo pagas al recibir 🛵💵.\n\n"
+                "🛍️ También puedes pasar a recogerlo directamente en nuestra tienda si prefieres.\n\n"
+                "📌 *Estamos en:* Barrio *San Miguel*, Calle 52 #16-74\n"
+                "🗺️ Google Maps: https://maps.google.com/?q=7.109500,-73.121597\n\n"
+            ),
+            "parse_mode": "Markdown"
+        }
+
+    # 2️⃣ 🚚 Cuánto cuesta el envío a... o ¿es gratis?
     if "envio" in texto:
-        # Caso 1: Cuánto cuesta el envío a...
+        # 2A: ¿Cuánto cuesta el envío a...?
         envio_match = re.search(
             r"(cu[aá]nto(?: cuesta| vale| cobran)?(?: el)? env[ií]o(?: a)?\s*([a-záéíóúñ\s]+)?)",
             texto
@@ -4295,7 +4342,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # Caso 2: ¿El envío es gratis?
+        # 2B: ¿El envío es gratis?
         if re.search(r"(env[ií]o.*(es )?gratis|es gratis.*env[ií]o|el env[ií]o tiene costo)", texto):
             return {
                 "type": "text",
@@ -4303,24 +4350,23 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-    # 🏡 Cliente menciona que está en Bucaramanga o quiere envío allá
-    if "bucaramanga" in texto and any(p in texto for p in {
-        "envío", "envios", "envían", "enviar", "soy de", "estoy en", "pueden llevar", "puedo recoger", "recoger"
+    # 3️⃣ 🌍 Preguntas genéricas sobre envío sin ciudad clara
+    if any(p in texto for p in {
+        "envían a", "envio a", "envíos a", "hacen envíos a", "tienen envío a", 
+        "pueden enviar a", "enviarían a", "envian hasta", "envían hasta", 
+        "pueden enviar hasta", "envían por", "tienen envíos a"
     }):
         return {
             "type": "text",
             "text": (
-                "📍 *¡Perfecto! Como eres de Bucaramanga, te podemos enviar hoy mismo el pedido con un domiciliario*, "
-                "y lo pagas al recibir 🛵💵.\n\n"
-                "🛍️ También puedes pasar a recogerlo directamente en nuestra tienda si prefieres.\n\n"
-                "📌 *Estamos en:* Barrio *San Miguel*, Calle 52 #16-74\n"
-                "🗺️ Google Maps: https://maps.google.com/?q=7.109500,-73.121597\n\n"
-                "🚚 ¡También hacemos envíos nacionales con Servientrega!"
+                "🚚 *¡Claro que sí! Hacemos envíos a todo Colombia 🇨🇴*, incluyendo tu ciudad.\n\n"
+                "📦 El envío es totalmente *GRATIS* y te llega en promedio en *2 a 3 días hábiles* 📬.\n"
+                "Puedes pagar contraentrega o por transferencia como prefieras 💳💵."
             ),
             "parse_mode": "Markdown"
         }
 
-    # 💳 Métodos de pago — bloque universal
+    # 4️⃣ 💳 Métodos de pago
     if any(p in texto for p in (
         "método de pago", "metodos de pago", "formas de pago", "formas para pagar",
         "como pago", "cómo puedo pagar", "qué medios de pago", "medios de pago", "aceptan nequi",
@@ -4350,6 +4396,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "💳 Aceptamos *Nequi, Daviplata, Bancolombia* y también *contraentrega*."
             }
+
 
     # Lista de palabras afirmativas comunes
     AFIRMATIVAS = [
