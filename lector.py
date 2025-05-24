@@ -2877,24 +2877,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_talla" and est.get("talla"):
         cliente = obtener_datos_cliente(numero)
 
-        if cliente:
-            nombre    = cliente.get("nombre", "cliente")
-            correo    = cliente.get("correo", "No registrado")
-            telefono  = cliente.get("telefono", numero)
-            cedula    = cliente.get("cedula", "No registrada")
-            ciudad    = cliente.get("ciudad", "No registrada")
-            provincia = cliente.get("provincia", "No registrada")
-            direccion = cliente.get("direccion", "No registrada")
+        # SOLO si existe memoria, mostrar resumen. Si no, pedir nombre
+        if not cliente:
+            est["fase"] = "esperando_nombre"
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Tu nombre completo para el pedido? 📝",
+                parse_mode="Markdown"
+            )
+            return
 
-            est.update({
-                "nombre": nombre,
-                "correo": correo,
-                "telefono": telefono,
-                "cedula": cedula,
-                "ciudad": ciudad,
-                "provincia": provincia,
-                "direccion": direccion
-            })
+        nombre    = cliente.get("nombre", "cliente")
+        correo    = cliente.get("correo", "No registrado")
+        telefono  = cliente.get("telefono", numero)
+        cedula    = cliente.get("cedula", "No registrada")
+        ciudad    = cliente.get("ciudad", "No registrada")
+        provincia = cliente.get("provincia", "No registrada")
+        direccion = cliente.get("direccion", "No registrada")
+
+        est.update({
+            "nombre": nombre,
+            "correo": correo,
+            "telefono": telefono,
+            "cedula": cedula,
+            "ciudad": ciudad,
+            "provincia": provincia,
+            "direccion": direccion
+        })
 
         precio = next(
             (i["precio"] for i in inv
@@ -2995,11 +3005,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "Mandame tu lengueta pa que confirmemos el pedido.\n\n"
+                "Mandame tu lengüeta pa que confirmemos el pedido.\n\n"
             ),
             parse_mode="Markdown"
         )
         return
+
     # 👟 Elegir talla (texto directo o confirmación de lengüeta)
     if est.get("fase") == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
@@ -3088,7 +3099,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
         if est.get("confirmacion_pendiente"):
@@ -3165,9 +3175,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-
-
-
         # B) Detectar qué campo desea cambiar
         campos = {
             "nombre": ["nombre"],
@@ -3195,6 +3202,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
 
 
 
