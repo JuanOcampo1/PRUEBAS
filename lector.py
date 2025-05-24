@@ -3943,6 +3943,20 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def responder_con_openai(mensaje_usuario):
     try:
+        # 🔍 Detectar saludo tipo "soy Juan de Pereira"
+        match_presentacion = re.search(
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{3,})\s*(?:de|desde)\s+([a-záéíóúñ\s]+)", 
+            mensaje_usuario.lower()
+        )
+        if match_presentacion:
+            nombre = match_presentacion.group(1).strip().title()
+            ciudad = match_presentacion.group(2).strip().title()
+            return (
+                f"👋 ¡Hola *{nombre}*! Bienvenido a X100.\n"
+                f"📍 Para *{ciudad}* el envío es *completamente gratis* 🚚✨"
+            )
+
+        # 🔁 Si no hay saludo personalizado, ir con OpenAI
         respuesta = await client.chat.completions.create(
             model="gpt-4-1106-preview",
             messages=[
@@ -3978,6 +3992,7 @@ async def responder_con_openai(mensaje_usuario):
     except Exception as e:
         logging.error(f"Error al consultar OpenAI: {e}")
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
+
 
 # 🧭 Manejo del catálogo si el usuario lo menciona
 async def manejar_catalogo(update, ctx):
