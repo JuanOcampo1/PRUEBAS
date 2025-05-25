@@ -1964,7 +1964,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta y en que talla lo deseas!"
             )
             logging.info("🎯 Procediendo a enviar videos...")
 
@@ -4797,7 +4797,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 if videos:
                     videos.insert(0, {
                         "type": "text",
-                        "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                        "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta y en qué talla lo deseas!"
                     })
                     videos.append({
                         "type": "text",
@@ -4811,14 +4811,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 mensajes.extend(videos)
                 mensajes.extend(otros_msgs)
 
-                # ✅ Solo si el cliente escribió "precio"
+                # ✅ Solo si el mensaje contiene la palabra "precio"
                 if "precio" in txt:
                     mensajes.append({
                         "type": "text",
                         "text": "💸 Manejamos varios precios. Envíame la referencia exacta o una foto 📸 del zapato que te interesa y te doy el precio al instante."
                     })
 
-                # 🟢 Marcar que ya saludó
+                # 🟢 Marcar que ya se saludó
                 est["fase"] = "esperando_color"
                 estado_usuario[cid] = est
 
@@ -4830,6 +4830,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "type": "text",
                     "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
                 }
+
 
 
 
