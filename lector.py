@@ -4745,72 +4745,85 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "buenas noches", "hey", "ey", "qué pasa", "que pasa", "buen día", "buen dia",
         "saludos", "holaaa", "ehhh", "epa", "holi", "oe", "oe que más", "nose hola"
     )):
-        reset_estado(cid)
 
-        # 1. Obtener welcome con audio + textos
-        bienvenida = await enviar_welcome_venom(cid)
-        bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
+        if est.get("fase") == "inicio":
+            reset_estado(cid)
 
-        # Separar audio del resto
-        audio_msg = next((m for m in bienvenida_msgs if m.get("type") == "audio"), None)
-        otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
+            # 1. Obtener welcome con audio + textos
+            bienvenida = await enviar_welcome_venom(cid)
+            bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
 
-        try:
-            # 2. Cargar videos desde disco
-            carpeta = "/var/data/videos"
-            archivos = sorted([
-                f for f in os.listdir(carpeta)
-                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
-            ])
+            # Separar audio del resto
+            audio_msg = next((m for m in bienvenida_msgs if m.get("type") == "audio"), None)
+            otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
 
-            # 3. Diccionario de nombres personalizados con emojis
-            nombres_con_emojis = {
-                "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
-                "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
-                "Descuentos.mp4":   "👟 Referencias 🔝 🔥 Promo 39 % Off 🔥",
-                "Infantil.mp4":     "👟 Referencias 🔝 🔥 Niños 🔥"
-            }
+            try:
+                # 2. Cargar videos desde disco en orden fijo
+                carpeta = "/var/data/videos"
+                orden_deseado = [
+                    "Referencias.mp4",
+                    "Referencias2.mp4",
+                    "Descuentos.mp4",
+                    "Infantil.mp4"
+                ]
 
-            videos = []
-            for nombre in archivos:
-                path = os.path.join(carpeta, nombre)
-                with open(path, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                    texto = nombres_con_emojis.get(
-                        nombre,
-                        f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
-                    )
+                archivos = [
+                    f for f in orden_deseado
+                    if os.path.exists(os.path.join(carpeta, f))
+                ]
+
+                # 3. Diccionario de nombres personalizados con emojis
+                nombres_con_emojis = {
+                    "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
+                    "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
+                    "Descuentos.mp4":   "👟 Referencias 🔝 🔥 Promo 39 % Off 🔥",
+                    "Infantil.mp4":     "👟 Referencias 🔝 🔥 Niños 🔥"
+                }
+
+                videos = []
+                for nombre in archivos:
+                    path = os.path.join(carpeta, nombre)
+                    with open(path, "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode()
+                        texto = nombres_con_emojis.get(
+                            nombre,
+                            f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                        )
+                        videos.append({
+                            "type": "video",
+                            "base64": f"data:video/mp4;base64,{b64}",
+                            "text": texto
+                        })
+
+                if videos:
+                    videos.insert(0, {
+                        "type": "text",
+                        "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                    })
                     videos.append({
-                        "type": "video",
-                        "base64": f"data:video/mp4;base64,{b64}",
-                        "text": texto
+                        "type": "text",
+                        "text": "🧐 Dime qué referencia te interesa. Si no está acá, envíame una foto 📸"
                     })
 
-            if videos:
-                videos.insert(0, {
+                # 4. Armar mensajes en orden: audio → videos → textos
+                mensajes = []
+                if audio_msg:
+                    mensajes.append(audio_msg)
+                mensajes.extend(videos)
+                mensajes.extend(otros_msgs)
+
+                # 🔁 Actualizar fase para que no lo repita
+                est["fase"] = "esperando_color"
+                estado_usuario[cid] = est
+
+                return {"type": "multi", "messages": mensajes}
+
+            except Exception as e:
+                logging.error(f"❌ Error cargando videos desde /var/data/videos: {e}")
+                return {
                     "type": "text",
-                    "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
-                })
-                videos.append({
-                    "type": "text",
-                    "text": "🧐 Dime qué referencia te interesa. Si no está acá, envíame una foto 📸"
-                })
-
-            # 4. Armar mensajes en orden: audio → videos → textos (catálogo, nombre)
-            mensajes = []
-            if audio_msg:
-                mensajes.append(audio_msg)
-            mensajes.extend(videos)
-            mensajes.extend(otros_msgs)
-
-            return {"type": "multi", "messages": mensajes}
-
-        except Exception as e:
-            logging.error(f"❌ Error cargando videos desde /var/data/videos: {e}")
-            return {
-                "type": "text",
-                "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
-            }
+                    "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
+                }
 
 
 
