@@ -4772,7 +4772,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     if os.path.exists(os.path.join(carpeta, f))
                 ]
 
-                # 3. Diccionario de nombres personalizados con emojis
                 nombres_con_emojis = {
                     "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
                     "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
@@ -4812,7 +4811,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 mensajes.extend(videos)
                 mensajes.extend(otros_msgs)
 
-                # 🔁 Actualizar fase para que no lo repita
+                # ✅ Solo si el cliente escribió "precio"
+                if "precio" in txt:
+                    mensajes.append({
+                        "type": "text",
+                        "text": "💸 Manejamos varios precios. Envíame la referencia exacta o una foto 📸 del zapato que te interesa y te doy el precio al instante."
+                    })
+
+                # 🟢 Marcar que ya saludó
                 est["fase"] = "esperando_color"
                 estado_usuario[cid] = est
 
@@ -4824,6 +4830,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "type": "text",
                     "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
                 }
+
 
 
 
