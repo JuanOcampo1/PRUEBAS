@@ -1595,10 +1595,23 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         try:
             path = os.path.join(ruta, archivo)
             modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
-            marca, modelo, color_archivo = (modelo_raw.split(maxsplit=2) + ["", "", ""])[:3]
 
-            # Precio exacto (marca + modelo + color)
-            item   = buscar_item(inventario, marca, modelo, color_archivo)
+            # 🔒 Marca fija = "DS"
+            marca = "DS"
+
+            # 🧠 Extraer modelo y color del nombre
+            partes = modelo_raw.split(maxsplit=2)
+            modelo = partes[1] if len(partes) > 1 else ""
+            color_archivo = partes[2] if len(partes) > 2 else color
+
+            # 🔍 Buscar item con coincidencia parcial en color
+            item = next(
+                (i for i in inventario
+                 if normalize(i["marca"]) == normalize(marca)
+                 and normalize(i["modelo"]) == normalize(modelo)
+                 and normalize(color_archivo) in normalize(i["color"])),
+                None
+            )
             precio = f"{int(item['precio']):,} COP" if item else "Consultar"
 
             caption = (
@@ -1614,7 +1627,7 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
 
             modelos_enviados.append(modelo_raw)
 
-            # 💾 Guardar primer modelo con precio válido en el estado
+            # 💾 Guardar primer modelo con precio válido
             if len(modelos_enviados) == 1 and item:
                 estado_usuario[cid].update({
                     "marca": marca,
@@ -1623,15 +1636,14 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
                     "precio_total": int(item["precio"])
                 })
 
-            if len(modelos_enviados) >= 4:  # máximo 4 imágenes
+            if len(modelos_enviados) >= 4:
                 break
 
         except Exception as e:
             logging.error(f"❌ Error enviando imagen: {e}")
 
-    # Guardar estado para el siguiente paso
     estado_usuario[cid].update({
-        "color":            color,  # ← original detectado
+        "color":            color,
         "fase":             "esperando_modelo_elegido",
         "modelos_enviados": modelos_enviados
     })
@@ -1641,6 +1653,7 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
         parse_mode="Markdown"
     )
+
 
 # ───────────────────────────────────────────────────────────────
 
@@ -2147,164 +2160,148 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 🚀 FLUJO DIRECTO: un solo modelo + “talla X” → pide lengüeta
         if len(modelos) == 1 and (m := re.search(r"talla\s*(\d{1,2})", texto_normalizado)):
-                est["modelo"] = modelos[0]
-                est["talla"]  = m.group(1)
+            est["modelo"] = modelos[0]
+            est["talla"]  = m.group(1)
 
-                # Guardar precio inmediato (corregido)
-                partes = est["modelo"].split()
-                marca  = partes[0] if len(partes) > 0 else ""
-                modelo = partes[1] if len(partes) > 1 else ""
-                color_archivo = partes[2] if len(partes) > 2 else est.get("color", "")
-                est.update({"marca": marca, "modelo": modelo, "color": color_archivo})
+            partes = est["modelo"].split()
+            marca  = partes[0] if len(partes) > 0 else ""
+            modelo = partes[1] if len(partes) > 1 else ""
+            color_archivo = partes[2] if len(partes) > 2 else est.get("color", "")
+            est.update({"marca": marca, "modelo": modelo, "color": color_archivo})
 
-                if marca and modelo:
-                        item = next(
-                                (i for i in inv if
-                                        normalize(i["marca"]) == normalize(marca) and
-                                        normalize(i["modelo"]) == normalize(modelo) and
-                                        (not color_archivo or normalize(i["color"]) == normalize(color_archivo))),
-                                None
-                        )
-                        if item:
-                                est["precio_total"] = int(item["precio"])
+            if marca and modelo:
+                item = next(
+                    (i for i in inv if
+                        normalize(i["marca"]) == normalize(marca) and
+                        normalize(i["modelo"]) == normalize(modelo) and
+                        (not color_archivo or normalize(color_archivo) in normalize(i["color"]))),
+                    None
+                )
+                if item:
+                    est["precio_total"] = int(item["precio"])
 
-                est["fase"] = "esperando_talla"  # fase que pide la foto de lengüeta
-                estado_usuario[cid] = est
+            est["fase"] = "esperando_talla"
+            estado_usuario[cid] = est
 
-                ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
-                if os.path.exists(ruta_ejemplo):
-                        with open(ruta_ejemplo, "rb") as f:
-                                b64 = base64.b64encode(f.read()).decode("utf-8")
-                        return {
-                                "type": "multi",
-                                "messages": [
-                                        {
-                                                "type": "text",
-                                                "text": (
-                                                        f"✅ ¡Claro que tenemos talla {est['talla']}! "
-                                                        "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
-                                                        "del zapato que usas normalmente 👟."
-                                                ),
-                                                "parse_mode": "Markdown"
-                                        },
-                                        {
-                                                "type": "photo",
-                                                "base64": f"data:image/jpeg;base64,{b64}",
-                                                "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                                        }
-                                ]
-                        }
-                # Si no hay imagen de ejemplo
+            ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta_ejemplo):
+                with open(ruta_ejemplo, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
                 return {
-                        "type": "text",
-                        "text": (
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
                                 f"✅ ¡Claro que tenemos talla {est['talla']}! "
-                                "📸 Para confirmar la medida exacta, mándame una foto de la lengüeta del zapato que usas normalmente 👟."
-                        ),
-                        "parse_mode": "Markdown"
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                "del zapato que usas normalmente 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
                 }
+
+            return {
+                "type": "text",
+                "text": (
+                    f"✅ ¡Claro que tenemos talla {est['talla']}! "
+                    "📸 Para confirmar la medida exacta, mándame una foto de la lengüeta del zapato que usas normalmente 👟."
+                ),
+                "parse_mode": "Markdown"
+            }
 
         # ---------- Resto de tu lógica normal -------------------
         faq_palabras = {
-                "envio", "pago", "garantia", "talla", "tallas",
-                "ubicacion", "donde", "horma", "precio", "costos"
+            "envio", "pago", "garantia", "talla", "tallas",
+            "ubicacion", "donde", "horma", "precio", "costos"
         }
 
         # 1️⃣ Referencia numérica (ej. 305)
         if (m := re.search(r"\b(\d{3})\b", texto)):
-                ref = m.group(1)
-                modelo_elegido = next((m for m in modelos if ref in m), None)
-                if not modelo_elegido:
-                        await ctx.bot.send_message(
-                                cid,
-                                "❌ No encontré esa referencia entre las imágenes. "
-                                "Escríbela de nuevo o envíame la foto del modelo."
-                        )
-                        return
-
-                est["modelo"] = modelo_elegido
-
-                # 🧠 Extraer marca, modelo y color reales del texto
-                partes = modelo_elegido.split()
-                marca  = partes[0] if len(partes) > 0 else ""
-                modelo = partes[1] if len(partes) > 1 else ""
-                color  = " ".join(partes[2:]) if len(partes) > 2 else est.get("color", "")
-
-                est.update({
-                        "marca": marca,
-                        "modelo": modelo,
-                        "color": color
-                })
-
-                # 🔁 Buscar precio con coincidencia parcial de color
-                item = next(
-                        (i for i in inv if
-                                normalize(i["marca"]) == normalize(marca) and
-                                normalize(i["modelo"]) == normalize(modelo) and
-                                normalize(color) in normalize(i["color"])),
-                        None
-                )
-                if item:
-                        est["precio_total"] = int(item["precio"])
-
-
-        # 2️⃣ Una sola imagen + afirmación genérica
-        elif len(modelos) == 1:
-                afirmaciones = {
-                        "si", "sí", "sii", "sisas", "de una", "dale", "hágale", "hagale",
-                        "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
-                        "me encantaron", "esos", "esas", "ese", "esa"
-                }
-                if (
-                        any(p in texto_normalizado for p in afirmaciones) and
-                        not any(p in texto_normalizado for p in faq_palabras)
-                ):
-                        est["modelo"] = modelos[0]
-
-        # 3️⃣ Pregunta directa por talla (una sola imagen) — ya cubierta arriba
-        # --------------------------------------------------------------
-
-        # 4️⃣ Si aún no sabemos qué modelo eligió
-        if "modelo" not in est:
+            ref = m.group(1)
+            modelo_elegido = next((m for m in modelos if ref in m), None)
+            if not modelo_elegido:
                 await ctx.bot.send_message(
-                        cid,
-                        "❓ Dime cuál te gusto de las que te mande."
+                    cid,
+                    "❌ No encontré esa referencia entre las imágenes. "
+                    "Escríbela de nuevo o envíame la foto del modelo."
                 )
                 return
 
+            est["modelo"] = modelo_elegido
+
+            partes = modelo_elegido.split()
+            marca  = partes[0] if len(partes) > 0 else ""
+            modelo = partes[1] if len(partes) > 1 else ""
+            color  = " ".join(partes[2:]) if len(partes) > 2 else est.get("color", "")
+            est.update({
+                "marca": marca,
+                "modelo": modelo,
+                "color": color
+            })
+
+            item = next(
+                (i for i in inv if
+                    normalize(i["marca"]) == normalize(marca) and
+                    normalize(i["modelo"]) == normalize(modelo) and
+                    normalize(color) in normalize(i["color"])),
+                None
+            )
+            if item:
+                est["precio_total"] = int(item["precio"])
+
+        # 2️⃣ Una sola imagen + afirmación genérica
+        elif len(modelos) == 1:
+            afirmaciones = {
+                "si", "sí", "sii", "sisas", "de una", "dale", "hágale", "hagale",
+                "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
+                "me encantaron", "esos", "esas", "ese", "esa"
+            }
+            if (
+                any(p in texto_normalizado for p in afirmaciones) and
+                not any(p in texto_normalizado for p in faq_palabras)
+            ):
+                est["modelo"] = modelos[0]
+
+        # 3️⃣ Si aún no sabemos qué modelo eligió
+        if "modelo" not in est:
+            await ctx.bot.send_message(
+                cid,
+                "❓ Dime cuál te gusto de las que te mandé."
+            )
+            return
+
         # ---------------- Manejo de talla cuando ya hay modelo -----------
         match_talla_preg = re.search(
-                r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado
+            r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado
         )
         match_talla = re.search(r"talla\s+(\d{1,2})", texto_normalizado)
 
         if "talla" in est and est["talla"]:
-                talla = est["talla"]
-                mensaje_inicial = (
-                        f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
-                )
+            talla = est["talla"]
+            mensaje_inicial = (
+                f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
+            )
         elif match_talla_preg:
-                talla = match_talla_preg.group(2)
-                est["talla"] = talla
-                mensaje_inicial = (
-                        f"✅ ¡Claro que tenemos talla *{talla}* para el modelo *{est['modelo']}*!\n"
-                )
+            talla = match_talla_preg.group(2)
+            est["talla"] = talla
+            mensaje_inicial = (
+                f"✅ ¡Claro que tenemos talla *{talla}* para el modelo *{est['modelo']}*!\n"
+            )
         elif match_talla:
-                talla = match_talla.group(1)
-                est["talla"] = talla
-                mensaje_inicial = (
-                        f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
-                )
+            talla = match_talla.group(1)
+            est["talla"] = talla
+            mensaje_inicial = (
+                f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
+            )
         else:
-                mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
-
-        # 🚨 Verifica el modelo
-        if not est.get("modelo"):
-                await ctx.bot.send_message(
-                        cid,
-                        "❓ Dime cuál referencias te gusto de las que te mande'."
-                )
-                return
+            mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
 
         # 📦 Guardar o actualizar precio (corregido)
         partes = est["modelo"].split()
@@ -2314,54 +2311,54 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est.update({"marca": marca, "modelo": modelo, "color": color_archivo})
 
         if marca and modelo:
-                item = next(
-                        (i for i in inv if
-                                normalize(i["marca"]) == normalize(marca) and
-                                normalize(i["modelo"]) == normalize(modelo) and
-                                (not color_archivo or normalize(i["color"]) == normalize(color_archivo))),
-                        None
-                )
-                if item:
-                        est["precio_total"] = int(item["precio"])
+            item = next(
+                (i for i in inv if
+                    normalize(i["marca"]) == normalize(marca) and
+                    normalize(i["modelo"]) == normalize(modelo) and
+                    (not color_archivo or normalize(color_archivo) in normalize(i["color"]))),
+                None
+            )
+            if item:
+                est["precio_total"] = int(item["precio"])
 
         # Persistir y cambiar fase
         est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
 
-        # 🔁 Solicitar foto de lengüeta (si hay imagen ejemplo)
+        # 🔁 Solicitar foto de lengüeta
         ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
         if os.path.exists(ruta_ejemplo):
-                with open(ruta_ejemplo, "rb") as f:
-                        b64 = base64.b64encode(f.read()).decode("utf-8")
-                return {
-                        "type": "multi",
-                        "messages": [
-                                {
-                                        "type": "text",
-                                        "text": (
-                                                mensaje_inicial +
-                                                "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* "
-                                                "del zapato que usas normalmente 👟."
-                                        ),
-                                        "parse_mode": "Markdown"
-                                },
-                                {
-                                        "type": "photo",
-                                        "base64": f"data:image/jpeg;base64,{b64}",
-                                        "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                                }
-                        ]
-                }
+            with open(ruta_ejemplo, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            return {
+                "type": "multi",
+                "messages": [
+                    {
+                        "type": "text",
+                        "text": (
+                            mensaje_inicial +
+                            "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* "
+                            "del zapato que usas normalmente 👟."
+                        ),
+                        "parse_mode": "Markdown"
+                    },
+                    {
+                        "type": "photo",
+                        "base64": f"data:image/jpeg;base64,{b64}",
+                        "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                    }
+                ]
+            }
 
-        # Si no existe la imagen de ejemplo
         return {
-                "type": "text",
-                "text": (
-                        mensaje_inicial +
-                        "📸 Envíame la foto de la lengüeta de tu zapato para confirmar la medida 👟."
-                ),
-                "parse_mode": "Markdown"
+            "type": "text",
+            "text": (
+                mensaje_inicial +
+                "📸 Envíame la foto de la lengüeta de tu zapato para confirmar la medida 👟."
+            ),
+            "parse_mode": "Markdown"
         }
+
 
 
 
