@@ -2253,11 +2253,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 📦 Guardar o actualizar precio
-        marca, modelo, color_archivo = (est["modelo"].split(maxsplit=2) + ["", "", ""])[:3]
+        # 📦 Guardar o actualizar precio (corregido)
+        partes = est["modelo"].split()
+        marca  = partes[0] if len(partes) > 0 else ""
+        modelo = partes[1] if len(partes) > 1 else ""
+        color_archivo = partes[2] if len(partes) > 2 else est.get("color", "")
         est.update({"marca": marca, "color": color_archivo})
-        if (item := buscar_item(inv, marca, modelo, color_archivo)):
-            est["precio_total"] = int(item["precio"])
+
+        if marca and modelo:
+                item = next(
+                    (i for i in inv if
+                        normalize(i["marca"]) == normalize(marca) and
+                        normalize(i["modelo"]) == normalize(modelo) and
+                        (not color_archivo or normalize(i["color"]) == normalize(color_archivo))),
+                    None
+                )
+                if item:
+                        est["precio_total"] = int(item["precio"])
 
         # Persistir y cambiar fase
         est["fase"] = "esperando_talla"
@@ -4821,9 +4833,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
-
-
-
 
 
     # 🔊 Petición de audio
