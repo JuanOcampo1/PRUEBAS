@@ -1613,7 +1613,17 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
             )
 
             modelos_enviados.append(modelo_raw)
-            if len(modelos_enviados) >= 4:          # máximo 4 imágenes
+
+            # 💾 Guardar primer modelo con precio válido en el estado
+            if len(modelos_enviados) == 1 and item:
+                estado_usuario[cid].update({
+                    "marca": marca,
+                    "modelo": modelo,
+                    "color": color_archivo,
+                    "precio_total": int(item["precio"])
+                })
+
+            if len(modelos_enviados) >= 4:  # máximo 4 imágenes
                 break
 
         except Exception as e:
@@ -1621,16 +1631,17 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
 
     # Guardar estado para el siguiente paso
     estado_usuario[cid].update({
-        "color":            color,
+        "color":            color,  # ← original detectado
         "fase":             "esperando_modelo_elegido",
         "modelos_enviados": modelos_enviados
     })
 
     await ctx.bot.send_message(
         cid,
-        "🧐 Dime cuál te gustó. Si  no es ninguna, envíame una foto del modelo que quieres.",
+        "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
         parse_mode="Markdown"
     )
+
 # ───────────────────────────────────────────────────────────────
 
 def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
@@ -2070,7 +2081,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if respuestas:
             return {
                 "type": "text",
-                "text": "\n".join(respuestas) + "\n\n🚚 Envío totalmente gratis a cualquier ciudad de Colombia.",
+                "text": (
+                    "👀 Mira estas referencias te cuestan:\n\n" +
+                    "\n".join(respuestas) +
+                    "\n\n🚚 *Con el envío totalmente gratis.*\n"
+                    "📏 ¿En qué *talla* los deseas?"
+                ),
                 "parse_mode": "Markdown"
             }
         else:
@@ -2079,6 +2095,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "text": "❌ No encontré los precios exactos de esos modelos. ¿Quieres que te los confirme manualmente?",
                 "parse_mode": "Markdown"
             }
+
 
 
 
