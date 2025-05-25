@@ -2221,7 +2221,32 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                 "Escríbela de nuevo o envíame la foto del modelo."
                         )
                         return
+
                 est["modelo"] = modelo_elegido
+
+                # 🧠 Extraer marca, modelo y color reales del texto
+                partes = modelo_elegido.split()
+                marca  = partes[0] if len(partes) > 0 else ""
+                modelo = partes[1] if len(partes) > 1 else ""
+                color  = " ".join(partes[2:]) if len(partes) > 2 else est.get("color", "")
+
+                est.update({
+                        "marca": marca,
+                        "modelo": modelo,
+                        "color": color
+                })
+
+                # 🔁 Buscar precio con coincidencia parcial de color
+                item = next(
+                        (i for i in inv if
+                                normalize(i["marca"]) == normalize(marca) and
+                                normalize(i["modelo"]) == normalize(modelo) and
+                                normalize(color) in normalize(i["color"])),
+                        None
+                )
+                if item:
+                        est["precio_total"] = int(item["precio"])
+
 
         # 2️⃣ Una sola imagen + afirmación genérica
         elif len(modelos) == 1:
