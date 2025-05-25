@@ -1604,12 +1604,12 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
             modelo = partes[1] if len(partes) > 1 else ""
             color_archivo = partes[2] if len(partes) > 2 else color
 
-            # 🔍 Buscar item con coincidencia parcial en color
+            # 🔍 Buscar item con coincidencia parcial invertida
             item = next(
                 (i for i in inventario
                  if normalize(i["marca"]) == normalize(marca)
                  and normalize(i["modelo"]) == normalize(modelo)
-                 and normalize(color_archivo) in normalize(i["color"])),
+                 and normalize(i["color"]) in normalize(color_archivo)),
                 None
             )
             precio = f"{int(item['precio']):,} COP" if item else "Consultar"
@@ -1653,6 +1653,7 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
         parse_mode="Markdown"
     )
+
 
 
 # ───────────────────────────────────────────────────────────────
