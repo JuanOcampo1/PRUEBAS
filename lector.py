@@ -2159,34 +2159,31 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         modelos = est.get("modelos_enviados", [])
         texto_normalizado = normalize(texto)
 
-        # 🚀 FLUJO DIRECTO: un solo modelo + “talla X”
+        # 🚀 Caso 1 - Un solo modelo + “talla X”
         if len(modelos) == 1 and (m := re.search(r"talla\s*(\d{1,2})", texto_normalizado)):
             est["modelo"] = modelos[0]
             est["talla"] = m.group(1)
 
-        faq_palabras = {
-            "envio", "pago", "garantia", "talla", "tallas",
-            "ubicacion", "donde", "horma", "precio", "costos"
-        }
-        afirmaciones = {
-            "si", "sí", "sii", "sisas", "de una", "dale", "hágale", "hagale",
-            "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
-            "me encantaron", "esos", "esas", "ese", "esa"
-        }
-
-        # 1️⃣ Detectar modelo por referencia numérica (ej. 305)
+        # 1️⃣ Referencia numérica (ej. 395)
         if not est.get("modelo") and (m := re.search(r"\b(\d{3})\b", texto)):
             ref = m.group(1)
             est["modelo"] = next((m for m in modelos if ref in m), None)
 
-        # 2️⃣ Detectar modelo por coincidencia textual
+        # 2️⃣ Coincidencia textual
         if not est.get("modelo"):
             for m in modelos:
                 if normalize(m) in texto_normalizado:
                     est["modelo"] = m
                     break
 
-        # 3️⃣ Afirmación (solo cuando hay 1 imagen)
+        # 3️⃣ Afirmación genérica (si solo hay 1 imagen)
+        afirmaciones = {
+            "si", "sí", "sii", "sisas", "de una", "dale", "hágale", "hagale",
+            "me gustaron", "me llevo esos", "quiero esos", "quiero esas",
+            "me encantaron", "esos", "esas", "ese", "esa"
+        }
+        faq_palabras = {"envio", "pago", "garantia", "talla", "tallas",
+                        "ubicacion", "donde", "horma", "precio", "costos"}
         if (
             not est.get("modelo")
             and len(modelos) == 1
@@ -2195,64 +2192,63 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ):
             est["modelo"] = modelos[0]
 
-        # 🛑 Si aún no hay modelo, preguntar de nuevo
-        if not est.get("modelo"):
+        # 🛑 Si aún no sabemos qué modelo eligió
+        if "modelo" not in est:
             await ctx.bot.send_message(cid, "❓ Dime cuál te gustó de las que te mandé.")
             return
 
-        # -----------------------------------------------------------------
-        # 📦 Extraer marca / modelo / color y CALCULAR PRECIO UNA SOLA VEZ
-        # -----------------------------------------------------------------
+        # ───────────────── MARCA / MODELO / COLOR ─────────────────
+        marca = "DS"                                    # ← fija
         partes = est["modelo"].split()
-        marca = partes[0] if len(partes) > 0 else ""
-        modelo = partes[1] if len(partes) > 1 else ""
-        color_archivo = " ".join(partes[2:]) if len(partes) > 2 else est.get("color", "")
+        # Si formato “DS 395 VERDE LIMON…”
+        if len(partes) >= 2 and partes[1].isdigit():
+            modelo = partes[1]
+            color_archivo = " ".join(partes[2:]) if len(partes) > 2 else est.get("color", "")
+        else:  # si quedó “395”
+            modelo = partes[0]
+            color_archivo = est.get("color", "")
         est.update({"marca": marca, "modelo": modelo, "color": color_archivo})
 
-        # ➡️ Siempre intenta precio (con y sin color) si aún no existe
-        if "precio_total" not in est or not est["precio_total"]:
+        # ─────────────────── Calcular PRECIO ─────────────────────
+        item = next(
+            (i for i in inv
+             if normalize(i["marca"]) == normalize(marca)
+             and normalize(i["modelo"]) == normalize(modelo)
+             and normalize(i["color"]) in normalize(color_archivo)),
+            None
+        )
+        if not item:  # Fallback sin color
             item = next(
                 (i for i in inv
                  if normalize(i["marca"]) == normalize(marca)
-                 and normalize(i["modelo"]) == normalize(modelo)
-                 and normalize(i["color"]) in normalize(color_archivo)),
+                 and normalize(i["modelo"]) == normalize(modelo)),
                 None
             )
-            if not item:  # si no coincidió por color, intenta solo marca + modelo
-                item = next(
-                    (i for i in inv
-                     if normalize(i["marca"]) == normalize(marca)
-                     and normalize(i["modelo"]) == normalize(modelo)),
-                    None
-                )
-            if item:
-                est["precio_total"] = int(item["precio"])
+        if item:
+            est["precio_total"] = int(item["precio"])
 
-        # ---------------- Manejo de talla -------------------------
-        match_talla_preg = re.search(
-            r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado
-        )
+        # ───────────────── Manejo de talla ───────────────────────
+        match_talla_preg = re.search(r"(tienen|hay|manejan|disponible).+talla\s+(\d{1,2})", texto_normalizado)
         match_talla = re.search(r"talla\s+(\d{1,2})", texto_normalizado)
 
-        if "talla" in est and est["talla"]:
+        if est.get("talla"):
             talla = est["talla"]
-            mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
+            mensaje_inicial = f"✅ Perfecto, tomaremos *{marca} {modelo} {color_archivo}* en talla *{talla}*.\n"
         elif match_talla_preg:
             talla = match_talla_preg.group(2)
             est["talla"] = talla
-            mensaje_inicial = f"✅ ¡Claro que tenemos talla *{talla}* para el modelo *{est['modelo']}*!\n"
+            mensaje_inicial = f"✅ ¡Claro que tenemos talla *{talla}* para el modelo *{marca} {modelo} {color_archivo}*!\n"
         elif match_talla:
             talla = match_talla.group(1)
             est["talla"] = talla
-            mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}* en talla *{talla}*.\n"
+            mensaje_inicial = f"✅ Perfecto, tomaremos *{marca} {modelo} {color_archivo}* en talla *{talla}*.\n"
         else:
-            mensaje_inicial = f"✅ Perfecto, tomaremos *{est['modelo']}*.\n"
+            mensaje_inicial = f"✅ Perfecto, tomaremos *{marca} {modelo} {color_archivo}*.\n"
 
-        # Persistir fase
+        # ─────────────── Persistir y pedir lengüeta ──────────────
         est["fase"] = "esperando_talla"
         estado_usuario[cid] = est
 
-        # 🔁 Pedir foto de lengüeta
         ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
         if os.path.exists(ruta_ejemplo):
             with open(ruta_ejemplo, "rb") as f:
@@ -2285,11 +2281,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             "parse_mode": "Markdown"
         }
-
-
-
-
-
 
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
