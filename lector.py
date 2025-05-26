@@ -408,6 +408,55 @@ def descargar_video_confianza():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
         logging.error(f"❌ Error descargando video de confianza: {e}")
+def descargar_memoria_ciudades():
+    """
+    Descarga el archivo ciudades.json desde la carpeta 'Memoria ciudades' en Drive.
+    Guarda el archivo en /var/data/ciudades/ciudades.json si aún no existe.
+    """
+    try:
+        print(">>> descargar_memoria_ciudades() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/ciudades", exist_ok=True)
+
+        logging.info("📂 [Memoria Ciudades] Iniciando descarga desde Drive…")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_MEMORIA_CIUDADES}")
+
+        # Buscar archivo ciudades.json en la carpeta
+        archivos = service.files().list(
+            q=f"'{CARPETA_MEMORIA_CIUDADES}' in parents and name = 'ciudades.json' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivos:
+            logging.warning("⚠️ No se encontró 'ciudades.json' en la carpeta Memoria ciudades.")
+            return
+
+        archivo = archivos[0]
+        ruta_destino = "/var/data/ciudades/ciudades.json"
+
+        if os.path.exists(ruta_destino):
+            logging.info("📦 Ya existe 'ciudades.json' — se omite descarga.")
+            return
+
+        logging.info(f"⬇️ Descargando: {archivo['name']}")
+        request = service.files().get_media(fileId=archivo["id"])
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(ruta_destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Archivo guardado: {ruta_destino}")
+        print(">>> descargar_memoria_ciudades() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_memoria_ciudades:", e)
+        logging.error(f"❌ Error descargando 'ciudades.json': {e}")
 
 def descargar_stickers_drive():
     """
@@ -4346,18 +4395,30 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # FAQ 5: ¿Dónde están ubicados?
         if any(p in texto for p in (
             "donde estan ubicados", "donde estan", "ubicacion", "ubicación",
-            "direccion", "tienda fisica", "Donde estan", "donde es la tienda",
+            "direccion", "tienda fisica", "donde es la tienda",
             "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
         )):
             return {
-                "type": "text",
-                "text": (
-                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                ),
-                "parse_mode": "Markdown"
+                "type": "multi",
+                "messages": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                            "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                            "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                            "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                        ),
+                        "parse_mode": "Markdown"
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
+                        ),
+                        "parse_mode": "Markdown"
+                    }
+                ]
             }
 
         # FAQ 6: ¿Son nacionales o importados?
@@ -4637,15 +4698,30 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # 👤 Solo aceptar nombre/ciudad si se pidió explícitamente luego del welcome
     if est.get("fase") == "inicio" and est.get("esperando_nombre"):
 
-        match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
-        if match_nombre:
-            est["nombre"] = match_nombre.group(2).capitalize()
+        texto_limpio = texto.strip()
 
-        match_ciudad = re.search(r"(de|desde|en)\s+([a-zA-Záéíóúñ\s]+)", normalize(txt))
-        if match_ciudad:
-            est["ciudad"] = match_ciudad.group(2).strip().title()
+        # 1️⃣ Detectar frases como: "Juan Pablo y de Pereira"
+        match_dual = re.search(r"^([a-zA-Záéíóúñ\s]+)[,y]+.*de\s+([a-zA-Záéíóúñ\s]+)$", texto_limpio, re.IGNORECASE)
+        if match_dual:
+            est["nombre"] = match_dual.group(1).strip().title()
+            ciudad_detectada = match_dual.group(2).strip().title()
+            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                est["ciudad"] = ciudad_detectada
 
-        # ▶️ Si obtuvo al menos nombre o ciudad por regex
+        # 2️⃣ Si no se detectó lo anterior, usar regex tradicionales
+        if "nombre" not in est:
+            match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
+            if match_nombre:
+                est["nombre"] = match_nombre.group(2).strip().title()
+
+        if "ciudad" not in est:
+            match_ciudad = re.search(r"(de|desde|en|ubicado en|soy de|me ubico en|estoy en)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
+            if match_ciudad:
+                ciudad_detectada = match_ciudad.group(2).strip().title()
+                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                    est["ciudad"] = ciudad_detectada
+
+        # 3️⃣ Si se detectó algo útil, enviar saludo
         if "nombre" in est or "ciudad" in est:
             est["esperando_nombre"] = False
             estado_usuario[cid] = est
@@ -4664,60 +4740,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # ▶️ Si no detectó por regex, usar IA para intentar extraer
-        try:
-            prompt = (
-                f"Extrae el nombre y ciudad del siguiente mensaje si están presentes:\n"
-                f"'{texto}'\n\n"
-                "Responde en JSON. Ejemplo:\n"
-                "{ \"nombre\": \"Laura\", \"ciudad\": \"Cali\" }.\n"
-                "Si no hay datos, responde con: {}"
-            )
-
-            respuesta = await client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{ "role": "user", "content": prompt }],
-                temperature=0,
-                response_format="json"
-            )
-
-            content = respuesta.choices[0].message.content
-            try:
-                datos = json.loads(content)
-            except json.JSONDecodeError as e:
-                logging.warning(f"⚠️ Error al parsear JSON IA: {e} | content: {content}")
-                datos = {}
-
-            if "nombre" in datos or "ciudad" in datos:
-                est["nombre"] = datos.get("nombre")
-                est["ciudad"] = datos.get("ciudad")
-
-                if est.get("nombre"):
-                    est["nombre"] = str(est["nombre"]).strip().capitalize()
-                if est.get("ciudad"):
-                    est["ciudad"] = str(est["ciudad"]).strip().title()
-
-                est["esperando_nombre"] = False
-                estado_usuario[cid] = est
-
-                nombre = est.get("nombre", "amig@")
-                ciudad = est.get("ciudad")
-                ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
-
-                return {
-                    "type": "text",
-                    "text": (
-                        f"👋 Hola {nombre}! "
-                        f"{ciudad_texto}"
-                        "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
-                    ),
-                    "parse_mode": "Markdown"
-                }
-
-        except Exception as e:
-            logging.warning(f"⚠️ Error usando IA para extraer nombre/ciudad: {e}")
-
-        # ▶️ Si el usuario ignoró la pregunta, continúa flujo normal
+        # 4️⃣ Si no se detectó nada, seguir flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
 
@@ -5230,6 +5253,7 @@ async def venom_webhook(req: Request):
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
+    descargar_memoria_ciudades()          # ⬇️ Descarga ciudades.json desde Drive
     descargar_videos_drive()              # ⬇️ Descarga los videos (si no existen)
     descargar_imagenes_catalogo()         # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
@@ -5237,6 +5261,7 @@ if __name__ == "__main__":
     descargar_audios_bienvenida_drive()
     descargar_imagen_lengueta()
     descargar_metodos_pago_drive()
+
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
