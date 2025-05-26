@@ -1582,6 +1582,14 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
     modelos_enviados = []
     modelos_info = []
 
+    # 🟥 Mensaje inicial antes de enviar las fotos
+    await ctx.bot.send_message(
+        cid,
+        f"📸 *Estos son los modelos de color {color.upper()} que manejamos.*\n"
+        "🚚 Recuerda que el *envío es totalmente gratis*.",
+        parse_mode="Markdown"
+    )
+
     for archivo in coincidencias:
         try:
             path = os.path.join(ruta, archivo)
@@ -1602,9 +1610,10 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
             precio = f"{int(item['precio']):,} COP" if item else "Consultar"
 
             caption = (
-                f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n"
+                f"📸 *{modelo_raw}*\n"
                 f"💰 Precio: {precio}"
             )
+
             await ctx.bot.send_photo(
                 chat_id=cid,
                 photo=open(path, "rb"),
@@ -1630,14 +1639,8 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         "color": color,
         "fase": "esperando_modelo_elegido",
         "modelos_enviados": modelos_enviados,
-        "modelos_info": modelos_info  # ← NUEVO
+        "modelos_info": modelos_info
     })
-
-    await ctx.bot.send_message(
-        cid,
-        "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
-        parse_mode="Markdown"
-    )
 
 
 
