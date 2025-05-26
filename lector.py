@@ -4328,6 +4328,28 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         }
 
     est = estado_usuario[cid]
+    # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
+    try:
+        texto_limpio = texto.strip().lower()
+
+        match_dual = re.search(
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+            texto_limpio
+        )
+        if match_dual:
+            nombre_detectado = match_dual.group(1).strip().title()
+            ciudad_detectada = match_dual.group(2).strip().title()
+
+            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                est["nombre"] = nombre_detectado
+                est["ciudad"] = ciudad_detectada
+                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
+            else:
+                logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+    except Exception as e:
+        logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
