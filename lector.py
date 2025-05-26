@@ -134,28 +134,42 @@ def registrar_o_actualizar_lead(data: dict) -> bool:
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
 
+# 🧠 Cargar memoria persistente
 def cargar_memoria_usuario(cid: str) -> dict:
     if os.path.exists(RUTA_MEMORIA_USUARIOS):
-        with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get(cid, {})
+        try:
+            with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get(cid, {})
+        except Exception as e:
+            logging.warning(f"⚠️ Error leyendo memoria de usuario: {e}")
     return {}
+
+# 🧠 Guardar clave/valor en memoria persistente
 def guardar_memoria_usuario(cid: str, key: str, valor: str):
     os.makedirs("/tmp", exist_ok=True)
     data = {}
     if os.path.exists(RUTA_MEMORIA_USUARIOS):
-        with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logging.warning(f"⚠️ Error leyendo memoria para escribir: {e}")
+            data = {}
 
     if cid not in data:
         data[cid] = {}
 
     data[cid][key] = valor
 
-    with open(RUTA_MEMORIA_USUARIOS, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(RUTA_MEMORIA_USUARIOS, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info(f"💾 Memoria actualizada para {cid}: {key} = {valor}")
+    except Exception as e:
+        logging.error(f"❌ Error escribiendo memoria: {e}")
 
-
+# 📥 Cargar CIUDADES_DISPONIBLES desde archivo (global)
 try:
     with open("/var/data/ciudades/ciudades.json", "r", encoding="utf-8") as f:
         CIUDADES_DISPONIBLES = json.load(f)
@@ -163,6 +177,32 @@ try:
 except Exception as e:
     logging.warning(f"⚠️ Error al cargar ciudades.json: {e}")
     CIUDADES_DISPONIBLES = []
+
+# 📍 Recuperar ciudad del cliente desde múltiples fuentes
+def get_ciudad_cliente(cid: str, est: dict) -> str:
+    """
+    Retorna la ciudad del cliente buscando en:
+    1. Memoria temporal (/tmp)
+    2. Memoria persistente (/tmp/memoria_usuarios.json)
+    3. Estado actual en RAM
+    """
+    try:
+        ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+        if os.path.exists(ruta_tmp):
+            with open(ruta_tmp, "r", encoding="utf-8") as f:
+                data_tmp = json.load(f)
+            ciudad_tmp = data_tmp.get(cid)
+            if ciudad_tmp:
+                return ciudad_tmp
+    except Exception as e:
+        logging.warning(f"⚠️ Error leyendo /tmp ciudad temporal: {e}")
+
+    memoria = cargar_memoria_usuario(cid)
+    if memoria.get("ciudad"):
+        return memoria["ciudad"]
+
+    return est.get("ciudad")
+
 
 def descargar_imagen_lengueta():
     """
