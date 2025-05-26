@@ -155,6 +155,15 @@ def guardar_memoria_usuario(cid: str, key: str, valor: str):
     with open(RUTA_MEMORIA_USUARIOS, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+
+try:
+    with open("/var/data/ciudades/ciudades.json", "r", encoding="utf-8") as f:
+        CIUDADES_DISPONIBLES = json.load(f)
+    logging.info(f"✅ Se cargaron {len(CIUDADES_DISPONIBLES)} ciudades desde ciudades.json")
+except Exception as e:
+    logging.warning(f"⚠️ Error al cargar ciudades.json: {e}")
+    CIUDADES_DISPONIBLES = []
+
 def descargar_imagen_lengueta():
     """
     Descarga la imagen de ejemplo de lengüeta desde Google Drive.
