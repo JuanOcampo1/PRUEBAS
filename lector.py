@@ -5254,6 +5254,11 @@ async def venom_webhook(req: Request):
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     descargar_memoria_ciudades()          # ⬇️ Descarga ciudades.json desde Drive
+
+    # ✅ Cargar lista de ciudades desde archivo
+    with open("/var/data/ciudades/ciudades.json", "r", encoding="utf-8") as f:
+        CIUDADES_DISPONIBLES = json.load(f)
+
     descargar_videos_drive()              # ⬇️ Descarga los videos (si no existen)
     descargar_imagenes_catalogo()         # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
