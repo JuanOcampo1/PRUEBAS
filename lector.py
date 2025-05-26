@@ -972,11 +972,11 @@ def menciona_catalogo(texto: str) -> bool:
     claves_exactas = [
         "catalogo", "ver catalogo", "mostrar catalogo", "quiero ver",
         "ver productos", "mostrar productos", "ver lo que tienes",
-        "ver tenis", "muestrame", "mostrar lo que tienes",
+        "ver tenis", "muestrame", "envieme fotos",
         "que estilos tiene", "no tengo imagenes", "tienes imagenes",
         "mandame el catalogo", "quiero ver modelos", "ver referencias",
         "quiero referencias", "muestrame los modelos", "que modelos tienes",
-        "que modelos hay", "envielas", "mandame fotos", "mandame las imagenes",
+        "que modelos hay", "envielas", "mandame fotos", "mandame imagenes",
         "envielas usted", "quiero ver imagenes", "tenis que tienes",
         "que hay", "quiero ver los pares", "muestra los tenis",
         "cuales modelos tienes", "mande fotos", "muestrame los pares",
@@ -4348,8 +4348,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # FAQ 5: ¿Dónde están ubicados?
         if any(p in texto for p in (
-            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-            "direccion", "tienda fisica", "donde estan", "donde es la tienda",
+            "donde estan ubicados", "donde estan", "ubicacion", "ubicación",
+            "direccion", "tienda fisica", "Donde estan", "donde es la tienda",
             "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
         )):
             return {
@@ -4848,45 +4848,44 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         
     # ─── MAIN try/except ───
     try:
-        reply = await responder(dummy_update, ctx)
+        # 🧠 El cliente pidió catálogo (texto tipo "mandeme fotos", "catalogo", etc.)
+        if menciona_catalogo(texto):
+                await manejar_catalogo(dummy_update, ctx)
+                est["fase"] = "inicio"
+                estado_usuario[cid] = est
+                if ctx.resp:
+                        return {"type": "multi", "messages": ctx.resp}
+                return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
 
-        # 🧭 Manejo del catálogo si el usuario lo menciona
-        if await manejar_catalogo(dummy_update, ctx):
-            est = estado_usuario.get(cid, {})         # ✅ asegúrate de obtener est primero
-            est["fase"] = "inicio"
-            estado_usuario[cid] = est
-            if ctx.resp:
-                return {"type": "multi", "messages": ctx.resp}
-            return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
+        reply = await responder(dummy_update, ctx)
 
         # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
         if isinstance(reply, dict):
-            return reply
+                return reply
 
         # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
-            if len(ctx.resp) == 1:
-                return ctx.resp[0]
-            else:
-                return {"type": "multi", "messages": ctx.resp}
+                if len(ctx.resp) == 1:
+                        return ctx.resp[0]
+                else:
+                        return {"type": "multi", "messages": ctx.resp}
 
         # ✅ Confirmar compra si usuario responde con afirmación
         est = estado_usuario.get(cid, {})
         if est.get("fase") == "confirmar_compra":
-            if any(pal in txt for pal in AFIRMATIVAS):
-                estado_usuario[cid]["fase"] = "esperando_direccion"
-                return {"type": "text", "text": "Perfecto 💥 ¿A qué dirección quieres que enviemos el pedido?"}
-            elif any(x in txt for x in ["cancel", "cancelar", "otra", "ver otro", "no gracias"]):
-                estado_usuario.pop(cid, None)
-                return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
-            else:
-                return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
-
+                if any(pal in txt for pal in AFIRMATIVAS):
+                        estado_usuario[cid]["fase"] = "esperando_direccion"
+                        return {"type": "text", "text": "Perfecto 💥 ¿A qué dirección quieres que enviemos el pedido?"}
+                elif any(x in txt for x in ["cancel", "cancelar", "otra", "ver otro", "no gracias"]):
+                        estado_usuario.pop(cid, None)
+                        return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
+                else:
+                        return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
         if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
-            return {"type": "text", "text": "💬 Espero tu método de pago o comprobante. 📸"}
+                return {"type": "text", "text": "💬 Espero tu método de pago o comprobante. 📸"}
 
         # 🔁 Caso final: pasar a la IA
         respuesta_ia = await responder_con_openai(body)
