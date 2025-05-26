@@ -177,6 +177,23 @@ try:
 except Exception as e:
     logging.warning(f"⚠️ Error al cargar ciudades.json: {e}")
     CIUDADES_DISPONIBLES = []
+def guardar_memoria_ciudad_temporal(cid, ciudad):
+    ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+    try:
+        if os.path.exists(ruta_tmp):
+            with open(ruta_tmp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+
+        data[cid] = ciudad
+
+        with open(ruta_tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        logging.info(f"🧠 Ciudad '{ciudad}' guardada en /tmp para {cid}")
+    except Exception as e:
+        logging.error(f"❌ Error guardando ciudad temporal: {e}")
 
 # 📍 Recuperar ciudad del cliente desde múltiples fuentes
 def get_ciudad_cliente(cid: str, est: dict) -> str:
