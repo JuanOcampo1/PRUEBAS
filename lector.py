@@ -1563,9 +1563,6 @@ def buscar_item(inv: list, marca: str, modelo: str, color: str):
     return None
 
 
-# ─────────────────────────────────────────────────────────────
-# Manejar mensajes tipo “me gustaron los amarillos”
-# ─────────────────────────────────────────────────────────────
 async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
     ruta = "/var/data/modelos_video"
     if not os.path.exists(ruta):
@@ -1575,10 +1572,8 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         )
         return
 
-    # Alias compatibles (amarillo → amarillo mostaza, etc.)
     aliases = [color] + [k for k, v in color_aliases.items() if v == color]
 
-    # Archivos .jpg cuyo nombre contiene el color o su alias
     coincidencias = [
         f for f in os.listdir(ruta)
         if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases)
@@ -1591,20 +1586,18 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         return
 
     modelos_enviados = []
+    primer_modelo_con_precio = None
+
     for archivo in coincidencias:
         try:
             path = os.path.join(ruta, archivo)
             modelo_raw = archivo.replace(".jpg", "").replace("_", " ")
-
-            # 🔒 Marca fija = "DS"
             marca = "DS"
 
-            # 🧠 Extraer modelo y color del nombre
             partes = modelo_raw.split(maxsplit=2)
             modelo = partes[1] if len(partes) > 1 else ""
             color_archivo = partes[2] if len(partes) > 2 else color
 
-            # 🔍 Buscar item con coincidencia parcial invertida
             item = next(
                 (i for i in inventario
                  if normalize(i["marca"]) == normalize(marca)
@@ -1627,20 +1620,24 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
 
             modelos_enviados.append(modelo_raw)
 
-            # 💾 Guardar primer modelo con precio válido
-            if len(modelos_enviados) == 1 and item:
-                estado_usuario[cid].update({
+            # 💾 Guardar el primer modelo que tenga precio válido
+            if not primer_modelo_con_precio and item:
+                primer_modelo_con_precio = {
                     "marca": marca,
                     "modelo": modelo,
                     "color": color_archivo,
                     "precio_total": int(item["precio"])
-                })
+                }
 
             if len(modelos_enviados) >= 4:
                 break
 
         except Exception as e:
             logging.error(f"❌ Error enviando imagen: {e}")
+
+    # Actualizar estado con el primer modelo válido que tenga precio
+    if primer_modelo_con_precio:
+        estado_usuario[cid].update(primer_modelo_con_precio)
 
     estado_usuario[cid].update({
         "color":            color,
@@ -1653,6 +1650,7 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
         parse_mode="Markdown"
     )
+
 
 
 
@@ -2192,10 +2190,48 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ):
             est["modelo"] = modelos[0]
 
+        # 🚨 Si ya se identificó el modelo (ej: "305"), extraer nombre completo del listado
+        if est.get("modelo"):
+            modelo_actual = est["modelo"]
+            modelos_enviados = est.get("modelos_enviados", [])
+
+            match = next((m for m in modelos_enviados if modelo_actual in m), None)
+            if match:
+                partes = match.split(maxsplit=2)
+                marca_detectada = "DS"  # fija
+                modelo_detectado = partes[1] if len(partes) > 1 else modelo_actual
+                color_detectado = partes[2] if len(partes) > 2 else est.get("color", "")
+
+                # Guardar marca, modelo, color
+                est.update({
+                    "marca": marca_detectada,
+                    "modelo": modelo_detectado,
+                    "color": color_detectado
+                })
+
+                # Buscar y guardar precio
+                item = next(
+                    (i for i in inv
+                     if normalize(i["marca"]) == normalize(marca_detectada)
+                     and normalize(i["modelo"]) == normalize(modelo_detectado)
+                     and normalize(i["color"]) in normalize(color_detectado)),
+                    None
+                )
+                if not item:
+                    item = next(
+                        (i for i in inv
+                         if normalize(i["marca"]) == normalize(marca_detectada)
+                         and normalize(i["modelo"]) == normalize(modelo_detectado)),
+                        None
+                    )
+                if item:
+                    est["precio_total"] = int(item["precio"])
+
         # 🛑 Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
             await ctx.bot.send_message(cid, "❓ Dime cuál te gustó de las que te mandé.")
             return
+
 
         # ───────────────── MARCA / MODELO / COLOR ─────────────────
         marca = "DS"                                    # ← fija
