@@ -2388,7 +2388,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 partes = modelo_raw.split()
 
                 if len(partes) >= 3:
-                    marca  = partes[0]
+                    marca = partes[0]
                     modelo = partes[1]
                     color_archivo = " ".join(partes[2:])
                 else:
@@ -2421,38 +2421,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if errores_envio:
                 await ctx.bot.send_message(cid, f"⚠️ No pude enviar {errores_envio} de {len(coincidencias)} imágenes.")
 
-
             # Guardar estado para precio/tallas posteriores
             est["color"] = color
             est["fase"] = "esperando_modelo_elegido"
             est["modelos_enviados"] = modelos_enviados
             estado_usuario[cid] = est
 
-            # 🧠 Si preguntó precio inmediatamente
-            if menciona_precio(txt):
-                if len(modelos_enviados) == 1:
-                    modelo = modelos_enviados[0]
-                    precio = obtener_precio(modelo)
-                    await ctx.bot.send_message(
-                        cid,
-                        f"💰 El modelo *{modelo}* cuesta: {precio if precio else 'Consultar'}."
-                    )
-                else:
-                    await ctx.bot.send_message(
-                        cid,
-                        "🤔 Envié varios modelos. Dime cuál exactamente para darte el precio."
-                    )
-                return
-
-            # Pregunta normal si no pidió precio
-            await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa, si no esta aca enviame una foto.")
+            # Mensaje final
+            await ctx.bot.send_message(
+                cid,
+                "🧐 Dime qué referencia te interesa. Si no está acá, envíame una foto 📸.",
+                parse_mode="Markdown"
+            )
             return
 
     except Exception as e:
         logging.error(f"❌ Error en bloque de detección de color: {e}")
         await ctx.bot.send_message(cid, "❌ Ocurrió un problema al procesar el color. Intenta de nuevo.")
         return
- 
+
 
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
@@ -4242,28 +4229,23 @@ async def manejar_catalogo(update, ctx):
 
     return False
 
-# ─────────────────────────────────────────────────────────────
-# 4. Procesar mensaje de WhatsApp
-# ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid   = str(cid)
-    texto = (body or "").lower()   # 1) siempre existe
-    txt   = texto                  # 2) alias que muchos bloques ya usan
-    globals()["texto"] = texto     # 3) si algún bloque viejo menciona `texto`, ya lo tiene
+    texto = (body or "").lower()
+    txt   = texto
+    globals()["texto"] = texto
 
-
-    # 🧠 Inicializa estado si no existe  ←  <<— NUEVA POSICIÓN
+    # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
-            "esperando_nombre": True        # 🆕 Flag de bienvenida (solo se usa una vez)
+            "esperando_nombre": True,
+            "welcome_enviado": False  # ✅ ← ESTA ES LA LÍNEA CLAVE
         }
 
-    est = estado_usuario[cid]              # ✅ Siempre definido desde aquí
+    est = estado_usuario[cid]
 
-
-    est = estado_usuario[cid]              # ← existe sí o sí
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
         print(f"[IGNORADO] Mensaje vacío de {cid}")
@@ -4728,7 +4710,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = est
 
 
-    if est.get("fase") == "inicio":
+    if est.get("fase") == "inicio" and not est.get("welcome_enviado"):
         reset_estado(cid)
 
         # 1. Obtener welcome con audio + textos
@@ -4799,6 +4781,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 })
 
             est["fase"] = "esperando_color"
+            est["welcome_enviado"] = True  # ✅ evita reenvío en el futuro
             estado_usuario[cid] = est
 
             return {"type": "multi", "messages": mensajes}
