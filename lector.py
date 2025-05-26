@@ -1645,7 +1645,7 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         mensaje_intro = (
             f"📸 *Estos son los modelos de color {color.upper()} que manejamos.*\n"
             "🚚 Recuerda que el *envío es totalmente gratis*.\n"
-            "🧐 Dime cuál te gusta o si quieres ver otro color."
+            "🧐 Dime cuál es el que mas te gusto."
         )
 
     await ctx.bot.send_message(
@@ -4402,28 +4402,62 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "direccion", "tienda fisica", "donde es la tienda",
             "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
         )):
+
+            def cargar_memoria_ciudad_temporal(cid):
+                ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+                if os.path.exists(ruta_tmp):
+                    try:
+                        with open(ruta_tmp, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        return data.get(cid)
+                    except Exception as e:
+                        logging.warning(f"⚠️ Error leyendo memoria temporal: {e}")
+                return None
+
+            mensajes = [
+                {
+                    "type": "text",
+                    "text": (
+                        "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                        "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                        "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                        "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                    ),
+                    "parse_mode": "Markdown"
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
+                    ),
+                    "parse_mode": "Markdown"
+                }
+            ]
+
+            # ✅ Verificar ciudad en memoria temporal, persistente o est
+            memoria_persistente = cargar_memoria_usuario(cid)
+            ciudad_cliente = (
+                cargar_memoria_ciudad_temporal(cid) or
+                memoria_persistente.get("ciudad") or
+                est.get("ciudad")
+            )
+
+            if ciudad_cliente:
+                mensajes.append({
+                    "type": "text",
+                    "text": (
+                        f"📦 *Recuerda que el envío a {ciudad_cliente} es completamente gratis.* "
+                        "¿Quieres que te los enviemos ya mismo? Te llegarán en unos *2 días hábiles* 🤩"
+                    ),
+                    "parse_mode": "Markdown"
+                })
+
             return {
                 "type": "multi",
-                "messages": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                            "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                            "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                            "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                        ),
-                        "parse_mode": "Markdown"
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
-                        ),
-                        "parse_mode": "Markdown"
-                    }
-                ]
+                "messages": mensajes
             }
+
+
 
         # FAQ 6: ¿Son nacionales o importados?
         if any(p in texto for p in (
@@ -4704,6 +4738,24 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         texto_limpio = texto.strip()
 
+        def guardar_memoria_ciudad_temporal(cid, ciudad):
+            ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+            try:
+                if os.path.exists(ruta_tmp):
+                    with open(ruta_tmp, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                else:
+                    data = {}
+
+                data[cid] = ciudad
+
+                with open(ruta_tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+
+                logging.info(f"🧠 Ciudad '{ciudad}' guardada en /tmp para {cid}")
+            except Exception as e:
+                logging.error(f"❌ Error guardando ciudad temporal: {e}")
+
         # 1️⃣ Detectar frases como: "Juan Pablo y de Pereira"
         match_dual = re.search(r"^([a-zA-Záéíóúñ\s]+)[,y]+.*de\s+([a-zA-Záéíóúñ\s]+)$", texto_limpio, re.IGNORECASE)
         if match_dual:
@@ -4711,6 +4763,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             ciudad_detectada = match_dual.group(2).strip().title()
             if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
                 est["ciudad"] = ciudad_detectada
+                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                logging.info(f"📍 Ciudad detectada y guardada desde match_dual: {ciudad_detectada}")
 
         # 2️⃣ Si no se detectó lo anterior, usar regex tradicionales
         if "nombre" not in est:
@@ -4724,6 +4778,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ciudad_detectada = match_ciudad.group(2).strip().title()
                 if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
                     est["ciudad"] = ciudad_detectada
+                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                    logging.info(f"📍 Ciudad detectada y guardada desde match_ciudad: {ciudad_detectada}")
 
         # 3️⃣ Si se detectó algo útil, enviar saludo
         if "nombre" in est or "ciudad" in est:
@@ -4747,6 +4803,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # 4️⃣ Si no se detectó nada, seguir flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
+
 
 
     if est.get("fase") == "inicio" and not est.get("welcome_enviado"):
