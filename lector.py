@@ -132,6 +132,28 @@ def registrar_o_actualizar_lead(data: dict) -> bool:
         logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
         return False
 
+RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
+
+def cargar_memoria_usuario(cid: str) -> dict:
+    if os.path.exists(RUTA_MEMORIA_USUARIOS):
+        with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get(cid, {})
+    return {}
+def guardar_memoria_usuario(cid: str, key: str, valor: str):
+    os.makedirs("/tmp", exist_ok=True)
+    data = {}
+    if os.path.exists(RUTA_MEMORIA_USUARIOS):
+        with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+    if cid not in data:
+        data[cid] = {}
+
+    data[cid][key] = valor
+
+    with open(RUTA_MEMORIA_USUARIOS, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def descargar_imagen_lengueta():
     """
@@ -1934,6 +1956,21 @@ def extraer_modelo(txt):
 def extraer_dia_hora(txt):
     m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
     return m.group() if m else "No especificado"
+import re
+
+# 🎨 Alias de color (bidireccional + plurales)
+color_aliases = {
+    "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
+    "celeste": "azul", "azules": "azul",
+    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
+    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
+    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
+}
+
+# 🚀 Agregar alias inversos automáticamente
+for base_color in list(color_aliases.values()):
+    color_aliases[base_color] = base_color
+
 # 📼 Asociación de colores y modelos por video específico
 colores_video_modelos = {
     "referencias": {
@@ -1949,44 +1986,37 @@ colores_video_modelos = {
     }
 }
 
-# 🎨 Alias de color (bidireccional)
-color_aliases = {
-    "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
-    "celeste": "azul", "azules": "azul",
-    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
-    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
-    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
-}
-
-# 🚀 Generar alias inversos automáticamente
-for base_color in list(color_aliases.values()):
-    color_aliases[base_color] = base_color
-
-# 🧠 Detección especial para colores por video
-def detectar_color_video(texto: str) -> str:
-    texto = texto.lower().strip()
-    for palabra, real_color in color_aliases.items():
-        if palabra in texto:
-            return real_color
-    for color in colores_video_modelos.get("referencias", {}):
-        if color in texto:
-            return color
-    return ""
-
-# 🎨 Detección general de colores
+# 🎨 Detección general de colores (con regex)
 def detectar_color(texto: str) -> str:
     texto = texto.lower().strip()
+
     for palabra, real_color in color_aliases.items():
-        if palabra in texto:
+        if re.search(rf"\b{re.escape(palabra)}\b", texto):
             return real_color
+
     colores_base = [
         "negro", "blanco", "rojo", "azul", "amarillo", "verde",
         "rosado", "gris", "morado", "naranja", "café", "beige",
         "neón", "limón", "fucsia", "celeste", "aqua", "turquesa"
     ]
     for c in colores_base:
-        if c in texto:
+        if re.search(rf"\b{re.escape(c)}\b", texto):
             return c
+
+    return ""
+
+# 🧠 Detección de color en contexto de video (también con regex)
+def detectar_color_video(texto: str) -> str:
+    texto = texto.lower().strip()
+
+    for palabra, real_color in color_aliases.items():
+        if re.search(rf"\b{re.escape(palabra)}\b", texto):
+            return real_color
+
+    for color in colores_video_modelos.get("referencias", {}):
+        if re.search(rf"\b{re.escape(color)}\b", texto):
+            return color
+
     return ""
 
 
@@ -4213,20 +4243,8 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def responder_con_openai(mensaje_usuario):
     try:
-        match_presentacion = re.search(
-            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s*(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
-            mensaje_usuario.lower()
-        )
-        if match_presentacion:
-            nombre = match_presentacion.group(1).strip().title()
-            ciudad = match_presentacion.group(2).strip().title()
-            return (
-                f"👋 ¡Hola *{nombre}*! Bienvenido a X100.\n"
-                f"📍 Para *{ciudad}* el envío es *completamente gratis* 🚚✨"
-            )
-
         respuesta = await client.chat.completions.create(
-            model="gpt-4o",  # ✅ modelo mini actualizado
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
