@@ -1566,10 +1566,7 @@ def buscar_item(inv: list, marca: str, modelo: str, color: str):
 async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
     ruta = "/var/data/modelos_video"
     if not os.path.exists(ruta):
-        await ctx.bot.send_message(
-            cid,
-            "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde."
-        )
+        await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
         return
 
     aliases = [color] + [k for k, v in color_aliases.items() if v == color]
@@ -1579,14 +1576,11 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases)
     ]
     if not coincidencias:
-        await ctx.bot.send_message(
-            cid,
-            f"😕 No encontré modelos con color *{color.upper()}*."
-        )
+        await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.")
         return
 
     modelos_enviados = []
-    primer_modelo_con_precio = None
+    modelos_info = []
 
     for archivo in coincidencias:
         try:
@@ -1619,15 +1613,12 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
             )
 
             modelos_enviados.append(modelo_raw)
-
-            # 💾 Guardar el primer modelo que tenga precio válido
-            if not primer_modelo_con_precio and item:
-                primer_modelo_con_precio = {
-                    "marca": marca,
-                    "modelo": modelo,
-                    "color": color_archivo,
-                    "precio_total": int(item["precio"])
-                }
+            modelos_info.append({
+                "marca": marca,
+                "modelo": modelo,
+                "color": color_archivo,
+                "precio_total": int(item["precio"]) if item else 0
+            })
 
             if len(modelos_enviados) >= 4:
                 break
@@ -1635,14 +1626,11 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         except Exception as e:
             logging.error(f"❌ Error enviando imagen: {e}")
 
-    # Actualizar estado con el primer modelo válido que tenga precio
-    if primer_modelo_con_precio:
-        estado_usuario[cid].update(primer_modelo_con_precio)
-
     estado_usuario[cid].update({
-        "color":            color,
-        "fase":             "esperando_modelo_elegido",
-        "modelos_enviados": modelos_enviados
+        "color": color,
+        "fase": "esperando_modelo_elegido",
+        "modelos_enviados": modelos_enviados,
+        "modelos_info": modelos_info  # ← NUEVO
     })
 
     await ctx.bot.send_message(
@@ -1650,6 +1638,7 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
         parse_mode="Markdown"
     )
+
 
 
 
