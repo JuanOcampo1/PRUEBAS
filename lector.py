@@ -408,6 +408,10 @@ def descargar_video_confianza():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
         logging.error(f"❌ Error descargando video de confianza: {e}")
+
+
+CARPETA_MEMORIA_CIUDADES = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"
+
 def descargar_memoria_ciudades():
     """
     Descarga el archivo ciudades.json desde la carpeta 'Memoria ciudades' en Drive.
