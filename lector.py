@@ -2179,47 +2179,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ):
             est["modelo"] = modelos[0]
 
-        # 🚨 Si ya se identificó el modelo (ej: "305"), extraer nombre completo del listado
+        # 🚨 Si ya se identificó el modelo, usar directamente la info precargada
         if est.get("modelo"):
             modelo_actual = est["modelo"]
-            modelos_enviados = est.get("modelos_enviados", [])
+            info_candidatos = est.get("modelos_info", [])
 
-            match = next((m for m in modelos_enviados if modelo_actual in m), None)
-            if match:
-                partes = match.split(maxsplit=2)
-                marca_detectada = "DS"  # fija
-                modelo_detectado = partes[1] if len(partes) > 1 else modelo_actual
-                color_detectado = partes[2] if len(partes) > 2 else est.get("color", "")
+            elegido = next((m for m in info_candidatos if m["modelo"] == modelo_actual), None)
 
-                # Guardar marca, modelo, color
+            if elegido:
                 est.update({
-                    "marca": marca_detectada,
-                    "modelo": modelo_detectado,
-                    "color": color_detectado
+                    "marca": elegido["marca"],
+                    "modelo": elegido["modelo"],
+                    "color": elegido["color"],
+                    "precio_total": elegido["precio_total"]
                 })
-
-                # Buscar y guardar precio
-                item = next(
-                    (i for i in inv
-                     if normalize(i["marca"]) == normalize(marca_detectada)
-                     and normalize(i["modelo"]) == normalize(modelo_detectado)
-                     and normalize(i["color"]) in normalize(color_detectado)),
-                    None
-                )
-                if not item:
-                    item = next(
-                        (i for i in inv
-                         if normalize(i["marca"]) == normalize(marca_detectada)
-                         and normalize(i["modelo"]) == normalize(modelo_detectado)),
-                        None
-                    )
-                if item:
-                    est["precio_total"] = int(item["precio"])
 
         # 🛑 Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
             await ctx.bot.send_message(cid, "❓ Dime cuál te gustó de las que te mandé.")
             return
+
 
 
         # ───────────────── MARCA / MODELO / COLOR ─────────────────
