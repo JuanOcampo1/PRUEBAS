@@ -4755,40 +4755,34 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     if est.get("fase") == "inicio" and est.get("esperando_nombre"):
 
         texto_limpio = texto.strip()
+        logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto_limpio}'")
 
-        def guardar_memoria_ciudad_temporal(cid, ciudad):
-            ruta_tmp = "/tmp/memoria_ciudades_temp.json"
-            try:
-                if os.path.exists(ruta_tmp):
-                    with open(ruta_tmp, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                else:
-                    data = {}
-
-                data[cid] = ciudad
-
-                with open(ruta_tmp, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-
-                logging.info(f"🧠 Ciudad '{ciudad}' guardada en /tmp para {cid}")
-            except Exception as e:
-                logging.error(f"❌ Error guardando ciudad temporal: {e}")
-
-        # 1️⃣ Detectar frases como: "Juan Pablo y de Pereira"
-        match_dual = re.search(r"^([a-zA-Záéíóúñ\s]+)[,y]+.*de\s+([a-zA-Záéíóúñ\s]+)$", texto_limpio, re.IGNORECASE)
+        # 1️⃣ Detectar frases como: "Hola soy Juan Pablo y soy de Pereira"
+        match_dual = re.search(
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+            texto_limpio.lower()
+        )
         if match_dual:
-            est["nombre"] = match_dual.group(1).strip().title()
+            nombre_detectado = match_dual.group(1).strip().title()
             ciudad_detectada = match_dual.group(2).strip().title()
+            logging.info(f"✅ Detected nombre='{nombre_detectado}' ciudad='{ciudad_detectada}' [match_dual]")
+
+            est["nombre"] = nombre_detectado
+
             if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
                 est["ciudad"] = ciudad_detectada
                 guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                logging.info(f"📍 Ciudad detectada y guardada desde match_dual: {ciudad_detectada}")
+                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                logging.info(f"📍 Ciudad validada con archivo y guardada: {ciudad_detectada}")
+            else:
+                logging.warning(f"❌ Ciudad '{ciudad_detectada}' no está en CIUDADES_DISPONIBLES")
 
         # 2️⃣ Si no se detectó lo anterior, usar regex tradicionales
         if "nombre" not in est:
             match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
             if match_nombre:
                 est["nombre"] = match_nombre.group(2).strip().title()
+                logging.info(f"✅ Nombre detectado por regex tradicional: {est['nombre']}")
 
         if "ciudad" not in est:
             match_ciudad = re.search(r"(de|desde|en|ubicado en|soy de|me ubico en|estoy en)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
@@ -4797,7 +4791,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
                     est["ciudad"] = ciudad_detectada
                     guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                    logging.info(f"📍 Ciudad detectada y guardada desde match_ciudad: {ciudad_detectada}")
+                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                    logging.info(f"📍 Ciudad detectada por fallback y guardada: {ciudad_detectada}")
+                else:
+                    logging.warning(f"❌ Ciudad '{ciudad_detectada}' no está en CIUDADES_DISPONIBLES")
 
         # 3️⃣ Si se detectó algo útil, enviar saludo
         if "nombre" in est or "ciudad" in est:
@@ -4807,6 +4804,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             nombre = est.get("nombre", "amig@")
             ciudad = est.get("ciudad")
             ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
+
+            logging.info(f"✅ ESTADO FINAL: nombre={nombre}, ciudad={ciudad}")
 
             return {
                 "type": "text",
@@ -4821,6 +4820,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # 4️⃣ Si no se detectó nada, seguir flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
+        logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
+
 
 
 
