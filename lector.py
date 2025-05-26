@@ -1583,12 +1583,24 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
     modelos_info = []
 
     # 🟥 Mensaje inicial antes de enviar las fotos
+    if len(coincidencias) == 1:
+        mensaje_intro = (
+            f"📸 *Este es el modelo de color {color.upper()} que manejamos.*\n"
+            "🚚 Recuerda que el *envío es totalmente gratis*."
+        )
+    else:
+        mensaje_intro = (
+            f"📸 *Estos son los modelos de color {color.upper()} que manejamos.*\n"
+            "🚚 Recuerda que el *envío es totalmente gratis*.\n"
+            "🧐 Dime cuál te gusta o si quieres ver otro color."
+        )
+
     await ctx.bot.send_message(
         cid,
-        f"📸 *Estos son los modelos de color {color.upper()} que manejamos.*\n"
-        "🚚 Recuerda que el *envío es totalmente gratis*.",
+        mensaje_intro,
         parse_mode="Markdown"
     )
+
 
     for archivo in coincidencias:
         try:
