@@ -4530,17 +4530,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                         "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
                     ),
                     "parse_mode": "Markdown"
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
-                    ),
-                    "parse_mode": "Markdown"
                 }
             ]
 
-            # ✅ Verificar ciudad en memoria temporal, persistente o est
+            # ✅ Verificar ciudad en memoria
             memoria_persistente = cargar_memoria_usuario(cid)
             ciudad_cliente = (
                 cargar_memoria_ciudad_temporal(cid) or
@@ -4557,11 +4550,21 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     ),
                     "parse_mode": "Markdown"
                 })
+            else:
+                mensajes.append({
+                    "type": "text",
+                    "text": (
+                        "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* "
+                        "y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
+                    ),
+                    "parse_mode": "Markdown"
+                })
 
             return {
                 "type": "multi",
                 "messages": mensajes
             }
+
 
 
 
