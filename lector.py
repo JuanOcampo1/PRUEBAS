@@ -1251,6 +1251,9 @@ def detectar_modelo_color(texto: str, inventario: list) -> dict:
     Extrae el modelo (número) y color solo de la línea que contiene 'DS-',
     arma la respuesta bonita: "¡Qué buena elección! Los 279 de color VERDE NEON..."
     """
+    import re
+    import unicodedata
+
     # Normalizar líneas
     lineas = texto.splitlines()
     lineas = [unicodedata.normalize("NFKD", l).encode("ascii", "ignore").decode("utf-8").upper() for l in lineas]
@@ -1297,9 +1300,11 @@ def detectar_modelo_color(texto: str, inventario: list) -> dict:
     precio = coincidencia["precio"]
 
     return {
+        "modelo": modelo_num,    # <-- AÑADE esto
+        "color": color,          # <-- Y esto
         "type": "text",
         "text": (
-            f"🟢 ¡Qué buena elección! Los DS {modelo_num} de color {color.upper()} están brutales 😎.\n"
+            f"🟢 ¡Qué buena elección! Los {modelo_num} de color {color.upper()} están brutales 😎.\n"
             f"💲 Su precio es: {precio:,.0f} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
             f"🎁 Hoy tienes 5 % de descuento si pagas ahora.\n\n"
             f"¿Seguimos con la compra?"
@@ -1499,11 +1504,22 @@ def detectar_talla(texto_usuario: str, tallas_disponibles: list[str]) -> str | N
 def reset_estado(cid: int):
     estado_usuario[cid] = {
         "fase": "inicio",
-        "marca": None, "modelo": None, "color": None, "talla": None,
-        "nombre": None, "correo": None, "telefono": None,
-        "ciudad": None, "provincia": None, "direccion": None,
-        "referencia": None, "resumen": None, "sale_id": None
+        "marca": None,
+        "modelo": None,
+        "color": None,
+        "talla": None,
+        "nombre": None,
+        "correo": None,
+        "telefono": None,
+        "ciudad": None,
+        "provincia": None,
+        "direccion": None,
+        "referencia": None,
+        "resumen": None,
+        "sale_id": None,
+        "welcome_enviado": cid in usuarios_saludo_enviado  # ← No se borra nunca si ya lo recibió
     }
+
 
 def menu_botones(opts: list[str]):
     return ReplyKeyboardMarkup([[KeyboardButton(o)] for o in opts], resize_keyboard=True)
@@ -2843,14 +2859,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
 
         if respuesta_ocr:
-            modelo_match = re.search(r"Los (\d{3})", respuesta_ocr["text"])
-            color_match = re.search(r"color ([A-ZÑ ]+)", respuesta_ocr["text"])
-
-            if modelo_match:
-                est["modelo"] = modelo_match.group(1)
-            if color_match:
-                est["color"] = color_match.group(1).strip().title()
-
+            est["modelo"] = respuesta_ocr.get("modelo")
+            est["color"] = respuesta_ocr.get("color")
             est["fase"] = "imagen_detectada"
             estado_usuario[cid] = est
 
@@ -2889,6 +2899,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
 
     # 📸 Imagen detectada — responder con modelo, color y PRECIO
@@ -5129,6 +5140,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         if texto.strip() in saludos_pasivos:
             return {"type": "text", "text": ""}
         return {"type": "text", "text": ""}
+
 
 
     # 🔊 Petición de audio
