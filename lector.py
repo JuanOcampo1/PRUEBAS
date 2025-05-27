@@ -1243,37 +1243,48 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
 import re
 import unicodedata
 
+import re
+import unicodedata
+
 def detectar_modelo_color(texto: str, inventario: list) -> dict:
     """
-    Analiza texto OCR para detectar modelo y color, y construir respuesta.
-
-    Args:
-        texto (str): Texto extraído con OCR (Google Vision)
-        inventario (list): Lista de productos. Cada item debe tener 'modelo', 'color' y 'precio'
-
-    Returns:
-        dict: Respuesta estructurada con texto y precio si se encuentra, o None si no hay match
+    Extrae el modelo (número) y color solo de la línea que contiene 'DS-',
+    arma la respuesta bonita: "¡Qué buena elección! Los 279 de color VERDE NEON..."
     """
-    # 1. Normalizar texto
-    texto_normalizado = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    # Normalizar líneas
+    lineas = texto.splitlines()
+    lineas = [unicodedata.normalize("NFKD", l).encode("ascii", "ignore").decode("utf-8").upper() for l in lineas]
 
-    # 2. Buscar modelo: DS-279, REF 298, o solo número
-    match_modelo = re.search(r"(?:DS|REF)?[-\s]?(\d{3})", texto_normalizado)
-    if not match_modelo:
+    # Buscar línea que tenga DS-
+    linea_modelo = next((l for l in lineas if "DS-" in l), None)
+    if not linea_modelo:
         return None
 
-    modelo_detectado = match_modelo.group(1)
+    # Buscar DS-xxx y lo que sigue
+    match = re.search(r"DS-?(\d{3})\s*([A-Z ]+)?", linea_modelo)
+    if not match:
+        return None
 
-    # 3. Detectar color entre todos los colores del inventario
-    posibles_colores = list({item["color"].upper() for item in inventario})
-    color_detectado = next((color for color in posibles_colores if color in texto_normalizado), None)
+    modelo_num = match.group(1)  # '279'
+    after_modelo = match.group(2) or ""
+    after_modelo = after_modelo.replace("UNISEX", "").strip()
 
-    # 4. Buscar coincidencia en el inventario
+    # Buscar color en inventario que esté en after_modelo
+    colores_disponibles = sorted({item["color"].upper() for item in inventario}, key=len, reverse=True)
+    color_detectado = next((color for color in colores_disponibles if color in after_modelo), None)
+
+    # Si no está en after_modelo, buscar en toda la línea o en texto
+    if not color_detectado:
+        for color in colores_disponibles:
+            if color in linea_modelo or color in texto.upper():
+                color_detectado = color
+                break
+
+    # Buscar el producto exacto
     coincidencia = next(
         (
             item for item in inventario
-            if modelo_detectado in item["modelo"]
-            and (not color_detectado or color_detectado in item["color"].upper())
+            if modelo_num in item["modelo"] and (not color_detectado or color_detectado == item["color"].upper())
         ),
         None
     )
@@ -1288,12 +1299,13 @@ def detectar_modelo_color(texto: str, inventario: list) -> dict:
     return {
         "type": "text",
         "text": (
-            f"🟢 ¡Qué buena elección! Los {modelo} de color {color.upper()} están brutales 😎.\n"
+            f"🟢 ¡Qué buena elección! Los DS {modelo_num} de color {color.upper()} están brutales 😎.\n"
             f"💲 Su precio es: {precio:,.0f} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
             f"🎁 Hoy tienes 5 % de descuento si pagas ahora.\n\n"
             f"¿Seguimos con la compra?"
         )
     }
+
 def extraer_texto_comprobante(path: str) -> str:
     try:
         logging.info(f"[OCR] 🚀 Iniciando OCR con Google Vision para: {path}")
