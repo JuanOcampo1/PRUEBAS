@@ -1057,7 +1057,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-        if mejor_modelo and mejor_sim >= 0.85:
+        if mejor_modelo and mejor_sim >= 0.75:
             return f"✅ La imagen coincide con *{mejor_modelo}*"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -4914,33 +4914,73 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
 
+    # ──────────────────────────────
+    # 🔁 CONTROL DE FLUJO INICIAL
+    # ──────────────────────────────
+    ADMIN_CID = "573137842559"  # Tu número de prueba
+    is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
-
-    if est.get("fase") == "inicio" and not est.get("welcome_enviado"):
+    # 1️⃣ COMANDO /start solo para admin (resetea todo)
+    if texto.strip() == "/start" and cid == ADMIN_CID:
         reset_estado(cid)
+        estado_usuario[cid] = {
+            "fase": "inicio",
+            "esperando_nombre": True,
+            "welcome_enviado": False
+        }
+        return {
+            "type": "text",
+            "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
+        }
 
-        # 1. Obtener welcome con audio + textos
+    # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
+    if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
+        est["welcome_enviado"] = True
+        est["fase"] = "imagen_detectada"
+        estado_usuario[cid] = est
+
+        try:
+            # ⏱ Procesar imagen como respuesta múltiple
+            respuesta_imagen = await manejar_imagen_inicial(cid, dummy_msg.photo, est)
+
+            # 🟢 Saludo previo antes de mostrar el resultado
+            saludo = {
+                "type": "text",
+                "text": "👋 Hola! Claro, déjame mostrarte lo que encontré con esta imagen 📸"
+            }
+
+            if respuesta_imagen.get("type") == "multi":
+                return {
+                    "type": "multi",
+                    "messages": [saludo] + respuesta_imagen.get("messages", [])
+                }
+            else:
+                return {
+                    "type": "multi",
+                    "messages": [saludo, respuesta_imagen]
+                }
+
+        except Exception as e:
+            logging.error(f"❌ Error procesando imagen inicial: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude analizar la imagen. ¿Puedes enviarla de nuevo enfocando solo el zapato?"
+            }
+
+    # 3️⃣ Enviar welcome si no se ha enviado aún y no es media
+    if est.get("fase") == "inicio" and not est.get("welcome_enviado") and not is_media_inicial:
+        est["welcome_enviado"] = True
+        estado_usuario[cid] = est
+
         bienvenida = await enviar_welcome_venom(cid)
         bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
-
-        # Separar audio del resto
         audio_msg = next((m for m in bienvenida_msgs if m.get("type") == "audio"), None)
         otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
 
         try:
-            # 2. Cargar videos desde disco en orden fijo
             carpeta = "/var/data/videos"
-            orden_deseado = [
-                "Referencias.mp4",
-                "Referencias2.mp4",
-                "Descuentos.mp4",
-                "Infantil.mp4"
-            ]
-
-            archivos = [
-                f for f in orden_deseado
-                if os.path.exists(os.path.join(carpeta, f))
-            ]
+            orden_deseado = ["Referencias.mp4", "Referencias2.mp4", "Descuentos.mp4", "Infantil.mp4"]
+            archivos = [f for f in orden_deseado if os.path.exists(os.path.join(carpeta, f))]
 
             nombres_con_emojis = {
                 "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
@@ -4954,15 +4994,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 path = os.path.join(carpeta, nombre)
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
-                    texto = nombres_con_emojis.get(
-                        nombre,
-                        f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
-                    )
-                    videos.append({
-                        "type": "video",
-                        "base64": f"data:video/mp4;base64,{b64}",
-                        "text": texto
-                    })
+                texto = nombres_con_emojis.get(nombre, f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}")
+                videos.append({
+                    "type": "video",
+                    "base64": f"data:video/mp4;base64,{b64}",
+                    "text": texto
+                })
 
             if videos:
                 videos.insert(0, {
@@ -4987,7 +5024,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 })
 
             est["fase"] = "esperando_color"
-            est["welcome_enviado"] = True  # ✅ evita reenvío en el futuro
             estado_usuario[cid] = est
 
             return {"type": "multi", "messages": mensajes}
@@ -4998,6 +5034,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
+
+    # 4️⃣ Filtro: si no se ha enviado el welcome_text, no responder a nada más
+    if not est.get("welcome_enviado"):
+        saludos_pasivos = {"hola", "hola!", "holaa", "buenos dias", "buenos días", "buenas tardes", "buenas noches"}
+        if texto.strip() in saludos_pasivos:
+            return {"type": "text", "text": ""}
+        return {"type": "text", "text": ""}
+
 
 
     # 🔊 Petición de audio
@@ -5307,7 +5351,7 @@ async def venom_webhook(req: Request):
 
                     logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    if mejor_modelo and mejor_sim >= 0.85:
+                    if mejor_modelo and mejor_sim >= 0.75:
                         p = mejor_modelo.split("_")
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
