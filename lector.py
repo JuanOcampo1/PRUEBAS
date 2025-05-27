@@ -5350,68 +5350,69 @@ async def venom_webhook(req: Request):
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
 
-        # 👟 LENGÜETA - detectar talla si está esperando_talla
-        elif fase == "esperando_talla":
-            try:
-                os.makedirs("temp", exist_ok=True)
-                path_img = f"temp/{cid}_lengueta.jpg"
-                with open(path_img, "wb") as f:
-                    f.write(img_bytes)
+            # 👟 LENGÜETA - detectar talla si está esperando_talla
+            elif fase == "esperando_talla":
+                try:
+                    os.makedirs("temp", exist_ok=True)
+                    path_img = f"temp/{cid}_lengueta.jpg"
+                    with open(path_img, "wb") as f:
+                        f.write(img_bytes)
 
-                image = vision.Image(content=img_bytes)
-                response = vision_client.text_detection(image=image)
-                textos_detectados = response.text_annotations
-                texto_extraido = textos_detectados[0].description if textos_detectados else ""
-                logging.info(f"[OCR LENGÜETA] Texto detectado:\n{texto_extraido}")
+                    image = vision.Image(content=img_bytes)
+                    response = vision_client.text_detection(image=image)
+                    textos_detectados = response.text_annotations
+                    texto_extraido = textos_detectados[0].description if textos_detectados else ""
+                    logging.info(f"[OCR LENGÜETA] Texto detectado:\n{texto_extraido}")
 
-                talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
-                if talla_detectada:
-                    est["talla"] = talla_detectada
-                    estado_usuario[cid] = est
+                    talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
+                    if talla_detectada:
+                        est["talla"] = talla_detectada
+                        estado_usuario[cid] = est
+                        return JSONResponse({
+                            "type": "text",
+                            "text": f"📏 Según la etiqueta que me envias, la talla ideal para tus zapatos es la *{talla_detectada}* en nuestra horma. ¿Deseas que te las enviemos hoy mismo?",
+                            "parse_mode": "Markdown"
+                        })
+                    else:
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
+                        })
+                except Exception as e:
+                    logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
                     return JSONResponse({
                         "type": "text",
-                        "text": f"📏 Según la etiqueta que me envias, la talla ideal para tus zapatos es la *{talla_detectada}* en nuestra horma. ¿Deseas que te las enviemos hoy mismo?",
-                        "parse_mode": "Markdown"
+                        "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
                     })
-                else:
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
-                    })
-            except Exception as e:
-                logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
-                })
 
-        # 🧠 OCR - intentar antes de CLIP
-        else:
-            try:
-                os.makedirs("temp", exist_ok=True)
-                path_img = f"temp/{cid}_img.jpg"
-                with open(path_img, "wb") as f:
-                    f.write(img_bytes)
+            # 🧠 OCR - intentar antes de CLIP
+            else:
+                try:
+                    os.makedirs("temp", exist_ok=True)
+                    path_img = f"temp/{cid}_img.jpg"
+                    with open(path_img, "wb") as f:
+                        f.write(img_bytes)
 
-                texto_ocr = extraer_texto_comprobante(path_img)
-                respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
+                    texto_ocr = extraer_texto_comprobante(path_img)
+                    respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
 
-                if respuesta_ocr:
-                    modelo_match = re.search(r"Los (\d{3})", respuesta_ocr["text"])
-                    color_match = re.search(r"color ([A-ZÑ ]+)", respuesta_ocr["text"])
+                    if respuesta_ocr:
+                        modelo_match = re.search(r"Los (\d{3})", respuesta_ocr["text"])
+                        color_match = re.search(r"color ([A-ZÑ ]+)", respuesta_ocr["text"])
 
-                    if modelo_match:
-                        est["modelo"] = modelo_match.group(1)
-                    if color_match:
-                        est["color"] = color_match.group(1).strip().title()
+                        if modelo_match:
+                            est["modelo"] = modelo_match.group(1)
+                        if color_match:
+                            est["color"] = color_match.group(1).strip().title()
 
-                    est["fase"] = "imagen_detectada"
-                    estado_usuario[cid] = est
+                        est["fase"] = "imagen_detectada"
+                        estado_usuario[cid] = est
 
-                    return JSONResponse(respuesta_ocr)
+                        return JSONResponse(respuesta_ocr)
 
-            except Exception as e:
-                logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
+                except Exception as e:
+                    logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
+
 
             # 🧠 CLIP - identificación de modelo
             try:
@@ -5462,10 +5463,12 @@ async def venom_webhook(req: Request):
                     color = estado_usuario[cid]["color"]
                     marca = estado_usuario[cid]["marca"]
                     precio = next(
-                        (i["precio"] for i in inv if
-                         normalize(i["modelo"]) == normalize(modelo) and
-                         normalize(i["color"]) == normalize(color) and
-                         normalize(i["marca"]) == normalize(marca)),
+                        (
+                            i["precio"] for i in inv
+                            if normalize(i["modelo"]) == normalize(modelo)
+                            and normalize(i["color"]) == normalize(color)
+                            and normalize(i["marca"]) == normalize(marca)
+                        ),
                         None
                     )
                     precio_str = f"{int(precio):,} COP" if precio else "No disponible"
@@ -5475,7 +5478,7 @@ async def venom_webhook(req: Request):
                         "text": (
                             f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
                             f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
-                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                             "¿Seguimos con la compra?"
                         ),
                         "parse_mode": "Markdown"
@@ -5560,6 +5563,9 @@ async def venom_webhook(req: Request):
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
             status_code=200
         )
+
+
+
 
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
