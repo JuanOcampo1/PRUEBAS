@@ -81,6 +81,7 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
+
 def registrar_o_actualizar_lead(data: dict) -> bool:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -1239,7 +1240,60 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+import re
+import unicodedata
 
+def detectar_modelo_color(texto: str, inventario: list) -> dict:
+    """
+    Analiza texto OCR para detectar modelo y color, y construir respuesta.
+
+    Args:
+        texto (str): Texto extraído con OCR (Google Vision)
+        inventario (list): Lista de productos. Cada item debe tener 'modelo', 'color' y 'precio'
+
+    Returns:
+        dict: Respuesta estructurada con texto y precio si se encuentra, o None si no hay match
+    """
+    # 1. Normalizar texto
+    texto_normalizado = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+
+    # 2. Buscar modelo: DS-279, REF 298, o solo número
+    match_modelo = re.search(r"(?:DS|REF)?[-\s]?(\d{3})", texto_normalizado)
+    if not match_modelo:
+        return None
+
+    modelo_detectado = match_modelo.group(1)
+
+    # 3. Detectar color entre todos los colores del inventario
+    posibles_colores = list({item["color"].upper() for item in inventario})
+    color_detectado = next((color for color in posibles_colores if color in texto_normalizado), None)
+
+    # 4. Buscar coincidencia en el inventario
+    coincidencia = next(
+        (
+            item for item in inventario
+            if modelo_detectado in item["modelo"]
+            and (not color_detectado or color_detectado in item["color"].upper())
+        ),
+        None
+    )
+
+    if not coincidencia:
+        return None
+
+    modelo = coincidencia["modelo"]
+    color = coincidencia["color"]
+    precio = coincidencia["precio"]
+
+    return {
+        "type": "text",
+        "text": (
+            f"🟢 ¡Qué buena elección! Los {modelo} de color {color.upper()} están brutales 😎.\n"
+            f"💲 Su precio es: {precio:,.0f} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+            f"🎁 Hoy tienes 5 % de descuento si pagas ahora.\n\n"
+            f"¿Seguimos con la compra?"
+        )
+    }
 def extraer_texto_comprobante(path: str) -> str:
     try:
         logging.info(f"[OCR] 🚀 Iniciando OCR con Google Vision para: {path}")
@@ -2772,7 +2826,27 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
 
-        # ➜ convert to base64 y usar CLIP
+        # 1️⃣ OCR antes de CLIP
+        texto_ocr = extraer_texto_comprobante(tmp)
+        respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
+
+        if respuesta_ocr:
+            modelo_match = re.search(r"Los (\d{3})", respuesta_ocr["text"])
+            color_match = re.search(r"color ([A-ZÑ ]+)", respuesta_ocr["text"])
+
+            if modelo_match:
+                est["modelo"] = modelo_match.group(1)
+            if color_match:
+                est["color"] = color_match.group(1).strip().title()
+
+            est["fase"] = "imagen_detectada"
+            estado_usuario[cid] = est
+
+            os.remove(tmp)
+            await ctx.bot.send_message(chat_id=cid, text=respuesta_ocr["text"])
+            return
+
+        # 2️⃣ CLIP si OCR falló
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
@@ -2803,6 +2877,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
     # 📸 Imagen detectada — responder con modelo, color y PRECIO
     if est.get("fase", "") in ("", "inicio", "imagen_detectada") and 'path_local' in locals():
@@ -4913,7 +4988,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = est
         logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
-
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
@@ -4935,33 +5009,35 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
     if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
-        est["welcome_enviado"] = True
         est["fase"] = "imagen_detectada"
-        estado_usuario[cid] = est
 
         try:
-            # ⏱ Procesar imagen como respuesta múltiple
             respuesta_imagen = await manejar_imagen_inicial(cid, dummy_msg.photo, est)
 
-            # 🟢 Saludo previo antes de mostrar el resultado
             saludo = {
                 "type": "text",
                 "text": "👋 Hola! Claro, déjame mostrarte lo que encontré con esta imagen 📸"
             }
 
-            if respuesta_imagen.get("type") == "multi":
-                return {
-                    "type": "multi",
-                    "messages": [saludo] + respuesta_imagen.get("messages", [])
-                }
-            else:
-                return {
-                    "type": "multi",
-                    "messages": [saludo, respuesta_imagen]
-                }
+            if respuesta_imagen:
+                est["welcome_enviado"] = True
+                estado_usuario[cid] = est
+
+                if respuesta_imagen.get("type") == "multi":
+                    return {
+                        "type": "multi",
+                        "messages": [saludo] + respuesta_imagen.get("messages", [])
+                    }
+                else:
+                    return {
+                        "type": "multi",
+                        "messages": [saludo, respuesta_imagen]
+                    }
 
         except Exception as e:
             logging.error(f"❌ Error procesando imagen inicial: {e}")
+            est["welcome_enviado"] = True
+            estado_usuario[cid] = est
             return {
                 "type": "text",
                 "text": "⚠️ No pude analizar la imagen. ¿Puedes enviarla de nuevo enfocando solo el zapato?"
@@ -5041,7 +5117,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         if texto.strip() in saludos_pasivos:
             return {"type": "text", "text": ""}
         return {"type": "text", "text": ""}
-
 
 
     # 🔊 Petición de audio
@@ -5275,130 +5350,152 @@ async def venom_webhook(req: Request):
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
 
-            # 👟 LENGÜETA - detectar talla si está esperando_talla
-            elif fase == "esperando_talla":
-                try:
-                    os.makedirs("temp", exist_ok=True)
-                    path_img = f"temp/{cid}_lengueta.jpg"
-                    with open(path_img, "wb") as f:
-                        f.write(img_bytes)
+        # 👟 LENGÜETA - detectar talla si está esperando_talla
+        elif fase == "esperando_talla":
+            try:
+                os.makedirs("temp", exist_ok=True)
+                path_img = f"temp/{cid}_lengueta.jpg"
+                with open(path_img, "wb") as f:
+                    f.write(img_bytes)
 
-                    image = vision.Image(content=img_bytes)
-                    response = vision_client.text_detection(image=image)
-                    textos_detectados = response.text_annotations
-                    texto_extraido = textos_detectados[0].description if textos_detectados else ""
-                    logging.info(f"[OCR LENGÜETA] Texto detectado:\n{texto_extraido}")
+                image = vision.Image(content=img_bytes)
+                response = vision_client.text_detection(image=image)
+                textos_detectados = response.text_annotations
+                texto_extraido = textos_detectados[0].description if textos_detectados else ""
+                logging.info(f"[OCR LENGÜETA] Texto detectado:\n{texto_extraido}")
 
-                    talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
-                    if talla_detectada:
-                        est["talla"] = talla_detectada
-                        estado_usuario[cid] = est
-                        return JSONResponse({
-                            "type": "text",
-                            "text": f"📏 Según la etiqueta que me envias, la talla ideal para tus zapatos es la *{talla_detectada}* en nuestra horma. ¿Deseas que te las enviemos hoy mismo?",
-                            "parse_mode": "Markdown"
-                        })
-                    else:
-                        return JSONResponse({
-                            "type": "text",
-                            "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
-                        })
-                except Exception as e:
-                    logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
+                talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
+                if talla_detectada:
+                    est["talla"] = talla_detectada
+                    estado_usuario[cid] = est
                     return JSONResponse({
                         "type": "text",
-                        "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
+                        "text": f"📏 Según la etiqueta que me envias, la talla ideal para tus zapatos es la *{talla_detectada}* en nuestra horma. ¿Deseas que te las enviemos hoy mismo?",
+                        "parse_mode": "Markdown"
                     })
+                else:
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
+                    })
+            except Exception as e:
+                logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
+                })
+
+        # 🧠 OCR - intentar antes de CLIP
+        else:
+            try:
+                os.makedirs("temp", exist_ok=True)
+                path_img = f"temp/{cid}_img.jpg"
+                with open(path_img, "wb") as f:
+                    f.write(img_bytes)
+
+                texto_ocr = extraer_texto_comprobante(path_img)
+                respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
+
+                if respuesta_ocr:
+                    modelo_match = re.search(r"Los (\d{3})", respuesta_ocr["text"])
+                    color_match = re.search(r"color ([A-ZÑ ]+)", respuesta_ocr["text"])
+
+                    if modelo_match:
+                        est["modelo"] = modelo_match.group(1)
+                    if color_match:
+                        est["color"] = color_match.group(1).strip().title()
+
+                    est["fase"] = "imagen_detectada"
+                    estado_usuario[cid] = est
+
+                    return JSONResponse(respuesta_ocr)
+
+            except Exception as e:
+                logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
 
             # 🧠 CLIP - identificación de modelo
-            else:
-                try:
-                    logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
+            try:
+                logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
-                    embeddings_raw = cargar_embeddings_desde_cache()
-                    embeddings: dict[str, list[list[float]]] = {}
-                    for modelo, vecs in embeddings_raw.items():
-                        if isinstance(vecs, list):
-                            if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                                embeddings[modelo] = [vecs]
-                            else:
-                                limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
-                                if limpios:
-                                    embeddings[modelo] = limpios
+                embeddings_raw = cargar_embeddings_desde_cache()
+                embeddings: dict[str, list[list[float]]] = {}
+                for modelo, vecs in embeddings_raw.items():
+                    if isinstance(vecs, list):
+                        if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
+                            embeddings[modelo] = [vecs]
+                        else:
+                            limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
+                            if limpios:
+                                embeddings[modelo] = limpios
 
-                    os.makedirs("temp", exist_ok=True)
-                    path_img = f"temp/{cid}_img.jpg"
-                    with open(path_img, "wb") as f:
-                        f.write(img_bytes)
+                emb_u = generar_embedding_imagen(img)
+                emb_u = torch.tensor(emb_u, dtype=torch.float32)
+                emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
+                if emb_u.shape[0] != 512:
+                    raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
 
-                    emb_u = generar_embedding_imagen(img)
-                    emb_u = torch.tensor(emb_u, dtype=torch.float32)
-                    emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
-                    if emb_u.shape[0] != 512:
-                        raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
+                mejor_sim, mejor_modelo = 0.0, None
+                for modelo, lista in embeddings.items():
+                    for i, emb_ref in enumerate(lista):
+                        try:
+                            arr_ref = torch.tensor(emb_ref, dtype=torch.float32)
+                            arr_ref = torch.nn.functional.normalize(arr_ref, dim=-1)
+                            sim = torch.dot(emb_u, arr_ref).item()
+                            if sim > mejor_sim:
+                                mejor_sim, mejor_modelo = sim, modelo
+                        except Exception as e:
+                            logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
 
-                    mejor_sim, mejor_modelo = 0.0, None
-                    for modelo, lista in embeddings.items():
-                        for i, emb_ref in enumerate(lista):
-                            try:
-                                arr_ref = torch.tensor(emb_ref, dtype=torch.float32)
-                                arr_ref = torch.nn.functional.normalize(arr_ref, dim=-1)
-                                sim = torch.dot(emb_u, arr_ref).item()
-                                if sim > mejor_sim:
-                                    mejor_sim, mejor_modelo = sim, modelo
-                            except Exception as e:
-                                logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
+                logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
+                if mejor_modelo and mejor_sim >= 0.75:
+                    p = mejor_modelo.split("_")
+                    estado_usuario.setdefault(cid, reset_estado(cid))
+                    estado_usuario[cid].update(
+                        fase="imagen_detectada",
+                        marca=p[0],
+                        modelo=p[1] if len(p) > 1 else "Des.",
+                        color="_".join(p[2:]) if len(p) > 2 else "Des."
+                    )
 
-                    if mejor_modelo and mejor_sim >= 0.75:
-                        p = mejor_modelo.split("_")
-                        estado_usuario.setdefault(cid, reset_estado(cid))
-                        estado_usuario[cid].update(
-                            fase="imagen_detectada",
-                            marca=p[0],
-                            modelo=p[1] if len(p) > 1 else "Des.",
-                            color="_".join(p[2:]) if len(p) > 2 else "Des."
-                        )
+                    modelo = estado_usuario[cid]["modelo"]
+                    color = estado_usuario[cid]["color"]
+                    marca = estado_usuario[cid]["marca"]
+                    precio = next(
+                        (i["precio"] for i in inv if
+                         normalize(i["modelo"]) == normalize(modelo) and
+                         normalize(i["color"]) == normalize(color) and
+                         normalize(i["marca"]) == normalize(marca)),
+                        None
+                    )
+                    precio_str = f"{int(precio):,} COP" if precio else "No disponible"
 
-                        modelo = estado_usuario[cid]["modelo"]
-                        color = estado_usuario[cid]["color"]
-                        marca = estado_usuario[cid]["marca"]
-                        precio = next(
-                            (i["precio"] for i in inv if
-                             normalize(i["modelo"]) == normalize(modelo) and
-                             normalize(i["color"]) == normalize(color) and
-                             normalize(i["marca"]) == normalize(marca)),
-                            None
-                        )
-                        precio_str = f"{int(precio):,} COP" if precio else "No disponible"
-
-                        return JSONResponse({
-                            "type": "text",
-                            "text": (
-                                f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
-                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                                "¿Seguimos con la compra?"
-                            ),
-                            "parse_mode": "Markdown"
-                        })
-                    else:
-                        reset_estado(cid)
-                        return JSONResponse({
-                            "type": "text",
-                            "text": (
-                                "❌ No logré identificar bien el modelo de la imagen.\n"
-                                "¿Podrías enviarme otra foto un poco más clara?"
-                            )
-                        })
-
-                except Exception:
-                    logging.exception("[CLIP] Error en identificación:")
                     return JSONResponse({
                         "type": "text",
-                        "text": "⚠️ Ocurrió un error analizando la imagen."
+                        "text": (
+                            f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
+                            f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
+                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            "¿Seguimos con la compra?"
+                        ),
+                        "parse_mode": "Markdown"
                     })
+                else:
+                    reset_estado(cid)
+                    return JSONResponse({
+                        "type": "text",
+                        "text": (
+                            "❌ No logré identificar bien el modelo de la imagen.\n"
+                            "¿Podrías enviarme otra foto un poco más clara?"
+                        )
+                    })
+
+            except Exception:
+                logging.exception("[CLIP] Error en identificación:")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "⚠️ Ocurrió un error analizando la imagen."
+                })
 
         # 💬 TEXTO
         elif mtype == "chat":
