@@ -2862,7 +2862,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         for linea in lineas_ocr:
             linea = linea.strip()
-            match = re.search(r"(DS[-_]?\s*\d{3})\s+([A-ZÁÉÍÓÚÑ ]+)", linea.upper())
+            linea = re.sub(r"(DS[-_]?\d{3})([A-Z])", r"\1 \2", linea.upper())  # ← arregla DS279Unisex
+
+            match = re.search(r"(DS[-_]?\s*\d{3})\s+([A-ZÁÉÍÓÚÑ ]+)", linea)
             if match:
                 modelo_raw = match.group(1).replace("_", "-").replace(" ", "").upper()
                 color_raw = match.group(2).strip().upper()
@@ -2928,6 +2930,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
 
 
