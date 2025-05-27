@@ -5413,92 +5413,91 @@ async def venom_webhook(req: Request):
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
 
+                # 🧠 CLIP - identificación de modelo
+                try:
+                    logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
-            # 🧠 CLIP - identificación de modelo
-            try:
-                logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
+                    embeddings_raw = cargar_embeddings_desde_cache()
+                    embeddings: dict[str, list[list[float]]] = {}
+                    for modelo, vecs in embeddings_raw.items():
+                        if isinstance(vecs, list):
+                            if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
+                                embeddings[modelo] = [vecs]
+                            else:
+                                limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
+                                if limpios:
+                                    embeddings[modelo] = limpios
 
-                embeddings_raw = cargar_embeddings_desde_cache()
-                embeddings: dict[str, list[list[float]]] = {}
-                for modelo, vecs in embeddings_raw.items():
-                    if isinstance(vecs, list):
-                        if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                            embeddings[modelo] = [vecs]
-                        else:
-                            limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
-                            if limpios:
-                                embeddings[modelo] = limpios
+                    emb_u = generar_embedding_imagen(img)
+                    emb_u = torch.tensor(emb_u, dtype=torch.float32)
+                    emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
+                    if emb_u.shape[0] != 512:
+                        raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
 
-                emb_u = generar_embedding_imagen(img)
-                emb_u = torch.tensor(emb_u, dtype=torch.float32)
-                emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
-                if emb_u.shape[0] != 512:
-                    raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
+                    mejor_sim, mejor_modelo = 0.0, None
+                    for modelo, lista in embeddings.items():
+                        for i, emb_ref in enumerate(lista):
+                            try:
+                                arr_ref = torch.tensor(emb_ref, dtype=torch.float32)
+                                arr_ref = torch.nn.functional.normalize(arr_ref, dim=-1)
+                                sim = torch.dot(emb_u, arr_ref).item()
+                                if sim > mejor_sim:
+                                    mejor_sim, mejor_modelo = sim, modelo
+                            except Exception as e:
+                                logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
 
-                mejor_sim, mejor_modelo = 0.0, None
-                for modelo, lista in embeddings.items():
-                    for i, emb_ref in enumerate(lista):
-                        try:
-                            arr_ref = torch.tensor(emb_ref, dtype=torch.float32)
-                            arr_ref = torch.nn.functional.normalize(arr_ref, dim=-1)
-                            sim = torch.dot(emb_u, arr_ref).item()
-                            if sim > mejor_sim:
-                                mejor_sim, mejor_modelo = sim, modelo
-                        except Exception as e:
-                            logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
+                    logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
-
-                if mejor_modelo and mejor_sim >= 0.75:
-                    p = mejor_modelo.split("_")
-                    estado_usuario.setdefault(cid, reset_estado(cid))
-                    estado_usuario[cid].update(
-                        fase="imagen_detectada",
-                        marca=p[0],
-                        modelo=p[1] if len(p) > 1 else "Des.",
-                        color="_".join(p[2:]) if len(p) > 2 else "Des."
-                    )
-
-                    modelo = estado_usuario[cid]["modelo"]
-                    color = estado_usuario[cid]["color"]
-                    marca = estado_usuario[cid]["marca"]
-                    precio = next(
-                        (
-                            i["precio"] for i in inv
-                            if normalize(i["modelo"]) == normalize(modelo)
-                            and normalize(i["color"]) == normalize(color)
-                            and normalize(i["marca"]) == normalize(marca)
-                        ),
-                        None
-                    )
-                    precio_str = f"{int(precio):,} COP" if precio else "No disponible"
-
-                    return JSONResponse({
-                        "type": "text",
-                        "text": (
-                            f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                            f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
-                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                            "¿Seguimos con la compra?"
-                        ),
-                        "parse_mode": "Markdown"
-                    })
-                else:
-                    reset_estado(cid)
-                    return JSONResponse({
-                        "type": "text",
-                        "text": (
-                            "❌ No logré identificar bien el modelo de la imagen.\n"
-                            "¿Podrías enviarme otra foto un poco más clara?"
+                    if mejor_modelo and mejor_sim >= 0.75:
+                        p = mejor_modelo.split("_")
+                        estado_usuario.setdefault(cid, reset_estado(cid))
+                        estado_usuario[cid].update(
+                            fase="imagen_detectada",
+                            marca=p[0],
+                            modelo=p[1] if len(p) > 1 else "Des.",
+                            color="_".join(p[2:]) if len(p) > 2 else "Des."
                         )
-                    })
 
-            except Exception:
-                logging.exception("[CLIP] Error en identificación:")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "⚠️ Ocurrió un error analizando la imagen."
-                })
+                        modelo = estado_usuario[cid]["modelo"]
+                        color = estado_usuario[cid]["color"]
+                        marca = estado_usuario[cid]["marca"]
+                        precio = next(
+                            (
+                                i["precio"] for i in inv
+                                if normalize(i["modelo"]) == normalize(modelo)
+                                and normalize(i["color"]) == normalize(color)
+                                and normalize(i["marca"]) == normalize(marca)
+                            ),
+                            None
+                        )
+                        precio_str = f"{int(precio):,} COP" if precio else "No disponible"
+
+                        return JSONResponse({
+                            "type": "text",
+                            "text": (
+                                f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
+                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                "¿Seguimos con la compra?"
+                            ),
+                            "parse_mode": "Markdown"
+                        })
+                    else:
+                        reset_estado(cid)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": (
+                                "❌ No logré identificar bien el modelo de la imagen.\n"
+                                "¿Podrías enviarme otra foto un poco más clara?"
+                            )
+                        })
+
+                except Exception:
+                    logging.exception("[CLIP] Error en identificación:")
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "⚠️ Ocurrió un error analizando la imagen."
+                    })
 
         # 💬 TEXTO
         elif mtype == "chat":
