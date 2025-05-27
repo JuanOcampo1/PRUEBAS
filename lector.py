@@ -65,6 +65,8 @@ logging.basicConfig(level=logging.INFO,
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
+estado_usuario = {}
+usuarios_saludo_enviado = set()
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -2856,17 +2858,44 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
-        respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
+        lineas_ocr = texto_ocr.splitlines()
 
-        if respuesta_ocr:
-            est["modelo"] = respuesta_ocr.get("modelo")
-            est["color"] = respuesta_ocr.get("color")
-            est["fase"] = "imagen_detectada"
-            estado_usuario[cid] = est
+        for linea in lineas_ocr:
+            linea = linea.strip()
+            match = re.search(r"(DS[-_]?\s*\d{3})\s+([A-ZÁÉÍÓÚÑ ]+)", linea.upper())
+            if match:
+                modelo_raw = match.group(1).replace("_", "-").replace(" ", "").upper()
+                color_raw = match.group(2).strip().upper()
 
-            os.remove(tmp)
-            await ctx.bot.send_message(chat_id=cid, text=respuesta_ocr["text"])
-            return
+                modelo_solo = modelo_raw.replace("DS-", "").strip()
+                color_detectado = color_raw.strip()
+
+                item = next(
+                    (i for i in inv if normalize(i["modelo"]) == normalize(modelo_solo)
+                     and normalize(i["color"]) == normalize(color_detectado)),
+                    None
+                )
+
+                if item:
+                    est.update({
+                        "marca": "DS",
+                        "modelo": modelo_solo,
+                        "color": color_detectado,
+                        "precio_total": item["precio"],
+                        "fase": "esperando_talla"
+                    })
+                    estado_usuario[cid] = est
+                    os.remove(tmp)
+
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"✅ Perfecto, tomaremos *DS {modelo_solo} {color_detectado.title()}*.\n"
+                            "📸 Para confirmar la talla exacta, envíame una foto de la lengüeta del zapato que usas normalmente 👟."
+                        ),
+                        parse_mode="Markdown"
+                    )
+                    return
 
         # 2️⃣ CLIP si OCR falló
         with open(tmp, "rb") as f_img:
@@ -2900,37 +2929,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-
-
-    # 📸 Imagen detectada — responder con modelo, color y PRECIO
-    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and 'path_local' in locals():
-        resultado = identificar_modelo_desde_clip(path_local)
-        if resultado:
-            modelo_detectado, color_detectado = resultado
-            est["modelo"] = modelo_detectado
-            est["color"] = color_detectado
-            est["fase"] = "imagen_detectada"
-
-            precio = next(
-                (i["precio"] for i in inv if
-                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
-                 normalize(i["modelo"]) == normalize(modelo_detectado) and
-                 normalize(i["color"]) == normalize(color_detectado)),
-                None
-            )
-            est["precio_total"] = int(precio) if precio else None
-
-            mensaje = (
-                f"📸 La imagen coincide con *{modelo_detectado}* color *{color_detectado}*.\n"
-                f"✅ ¿Confirmas que es el modelo que deseas?"
-            )
-            if precio:
-                mensaje += f"\n💰 Ese modelo tiene un precio de *${precio}* COP."
-
-            mensaje += "\n\nResponde *sí* para continuar o *no* para elegir otro modelo."
-
-            await ctx.bot.send_message(chat_id=cid, text=mensaje, parse_mode="Markdown")
-            return
 
 
     # 📷 Confirmación si la imagen detectada fue correcta
@@ -5025,6 +5023,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "esperando_nombre": True,
             "welcome_enviado": False
         }
+        if cid in usuarios_saludo_enviado:
+            usuarios_saludo_enviado.remove(cid)  # Permite que vuelva a recibir el welcome
         return {
             "type": "text",
             "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
@@ -5044,6 +5044,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
             if respuesta_imagen:
                 est["welcome_enviado"] = True
+                usuarios_saludo_enviado.add(cid)    # ← Importante
                 estado_usuario[cid] = est
 
                 if respuesta_imagen.get("type") == "multi":
@@ -5060,6 +5061,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         except Exception as e:
             logging.error(f"❌ Error procesando imagen inicial: {e}")
             est["welcome_enviado"] = True
+            usuarios_saludo_enviado.add(cid)    # ← Importante
             estado_usuario[cid] = est
             return {
                 "type": "text",
@@ -5069,6 +5071,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # 3️⃣ Enviar welcome si no se ha enviado aún y no es media
     if est.get("fase") == "inicio" and not est.get("welcome_enviado") and not is_media_inicial:
         est["welcome_enviado"] = True
+        usuarios_saludo_enviado.add(cid)    # ← Importante
         estado_usuario[cid] = est
 
         bienvenida = await enviar_welcome_venom(cid)
@@ -5135,7 +5138,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
     # 4️⃣ Filtro: si no se ha enviado el welcome_text, no responder a nada más
-    if not est.get("welcome_enviado"):
+    if not est.get("welcome_enviado") and cid not in usuarios_saludo_enviado:
         saludos_pasivos = {"hola", "hola!", "holaa", "buenos dias", "buenos días", "buenas tardes", "buenas noches"}
         if texto.strip() in saludos_pasivos:
             return {"type": "text", "text": ""}
