@@ -319,24 +319,32 @@ from googleapiclient.http import MediaIoBaseDownload
 
 def descargar_audios_bienvenida_drive():
     """
-    Descarga audios desde las subcarpetas 'BIENVENIDA', 'CONFIANZA' y 'CONTRAENTREGA'
-    dentro de la carpeta 'Audios' en Google Drive.
-    Guarda los archivos en:
-    - /var/data/audios/bienvenida/
-    - /var/data/audios/confianza/
-    - /var/data/audios/contraentrega/
+    Descarga audios desde las subcarpetas:
+      • BIENVENIDA          → /var/data/audios/bienvenida/
+      • CONFIANZA           → /var/data/audios/confianza/
+      • CONTRAENTREGA       → /var/data/audios/contraentrega/
+      • PRECIO              → /var/data/audios/precio/
+      • REALIZAR COMPRA     → /var/data/audios/realizar_compra/
     """
     try:
         print(">>> descargar_audios_bienvenida_drive() – iniciando")
         service = get_drive_service()
 
         # Rutas de destino locales
-        carpeta_bienvenida     = "/var/data/audios/bienvenida"
-        carpeta_confianza      = "/var/data/audios/confianza"
-        carpeta_contraentrega  = "/var/data/audios/contraentrega"
-        os.makedirs(carpeta_bienvenida, exist_ok=True)
-        os.makedirs(carpeta_confianza, exist_ok=True)
-        os.makedirs(carpeta_contraentrega, exist_ok=True)
+        carpeta_bienvenida        = "/var/data/audios/bienvenida"
+        carpeta_confianza         = "/var/data/audios/confianza"
+        carpeta_contraentrega     = "/var/data/audios/contraentrega"
+        carpeta_precio            = "/var/data/audios/precio"
+        carpeta_realizar_compra   = "/var/data/audios/realizar_compra"
+
+        for p in (
+            carpeta_bienvenida,
+            carpeta_confianza,
+            carpeta_contraentrega,
+            carpeta_precio,
+            carpeta_realizar_compra,
+        ):
+            os.makedirs(p, exist_ok=True)
 
         # 🧹 Limpiar bienvenida
         for f in os.listdir(carpeta_bienvenida):
@@ -344,98 +352,156 @@ def descargar_audios_bienvenida_drive():
             if os.path.isfile(archivo):
                 os.remove(archivo)
 
-        logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
-
+        # ------------------------------------------------------------------
+        # BIENVENIDA  (descarga todos los mp3)
+        # ------------------------------------------------------------------
+        logging.info("📂 [Audios Bienvenida] Descargando desde 'BIENVENIDA'…")
         bienvenida = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' "
+              f"and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id,name)", pageSize=1
         ).execute().get("files", [])
 
         if bienvenida:
             bienvenida_id = bienvenida[0]["id"]
             audios = service.files().list(
                 q=f"'{bienvenida_id}' in parents and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
+                fields="files(id,name)"
             ).execute().get("files", [])
-
             for audio in audios:
-                nombre = audio["name"]
-                destino = os.path.join(carpeta_bienvenida, nombre)
+                destino = os.path.join(carpeta_bienvenida, audio["name"])
                 request = service.files().get_media(fileId=audio["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
+                buf, dl = io.BytesIO(), MediaIoBaseDownload(io.BytesIO(), request)
                 done = False
                 while not done:
-                    _, done = downloader.next_chunk()
+                    _, done = dl.next_chunk()
                 with open(destino, "wb") as f:
-                    f.write(buffer.getvalue())
+                    f.write(dl._fd.getvalue())
                 logging.info(f"✅ Guardado: {destino}")
         else:
             logging.warning("❌ No se encontró la subcarpeta 'BIENVENIDA'.")
 
-        # ─── CONFIANZA ───
-        logging.info("📂 [Audio Confianza] Buscando en carpeta 'CONFIANZA'…")
-
+        # ------------------------------------------------------------------
+        # CONFIANZA  (solo Desconfianza.mp3)
+        # ------------------------------------------------------------------
+        logging.info("📂 [Audio Confianza] Buscando en 'CONFIANZA'…")
         confianza = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONFIANZA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONFIANZA' "
+              f"and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id,name)", pageSize=1
         ).execute().get("files", [])
 
         if confianza:
-            confianza_id = confianza[0]["id"]
+            carpeta_id = confianza[0]["id"]
             archivo = service.files().list(
-                q=f"'{confianza_id}' in parents and name = 'Desconfianza.mp3' and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
+                q=f"'{carpeta_id}' in parents and name = 'Desconfianza.mp3' "
+                  f"and mimeType contains 'audio/' and trashed = false",
+                fields="files(id,name)"
             ).execute().get("files", [])
-
             if archivo:
-                nombre = archivo[0]["name"]
-                destino = os.path.join(carpeta_confianza, nombre)
+                destino = os.path.join(carpeta_confianza, archivo[0]["name"])
                 request = service.files().get_media(fileId=archivo[0]["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
+                buf, dl = io.BytesIO(), MediaIoBaseDownload(buf, request)
                 done = False
                 while not done:
-                    _, done = downloader.next_chunk()
+                    _, done = dl.next_chunk()
                 with open(destino, "wb") as f:
-                    f.write(buffer.getvalue())
+                    f.write(buf.getvalue())
                 logging.info(f"✅ Guardado: {destino}")
             else:
                 logging.warning("❌ No se encontró 'Desconfianza.mp3' en CONFIANZA.")
         else:
             logging.warning("❌ No se encontró la carpeta 'CONFIANZA'.")
 
-        # ─── CONTRAENTREGA ───
-        logging.info("📂 [Audio Contraentrega] Buscando en carpeta 'CONTRAENTREGA'…")
-
+        # ------------------------------------------------------------------
+        # CONTRAENTREGA  (solo CONTRAENTREGA.mp3)
+        # ------------------------------------------------------------------
+        logging.info("📂 [Audio Contraentrega] Buscando en 'CONTRAENTREGA'…")
         contraentrega = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONTRAENTREGA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONTRAENTREGA' "
+              f"and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id,name)", pageSize=1
         ).execute().get("files", [])
 
         if contraentrega:
             carpeta_id = contraentrega[0]["id"]
             archivo = service.files().list(
-                q=f"'{carpeta_id}' in parents and name = 'CONTRAENTREGA.mp3' and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
+                q=f"'{carpeta_id}' in parents and name = 'CONTRAENTREGA.mp3' "
+                  f"and mimeType contains 'audio/' and trashed = false",
+                fields="files(id,name)"
             ).execute().get("files", [])
-
             if archivo:
-                nombre = archivo[0]["name"]
-                destino = os.path.join(carpeta_contraentrega, nombre)
+                destino = os.path.join(carpeta_contraentrega, archivo[0]["name"])
                 request = service.files().get_media(fileId=archivo[0]["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
+                buf, dl = io.BytesIO(), MediaIoBaseDownload(buf, request)
                 done = False
                 while not done:
-                    _, done = downloader.next_chunk()
+                    _, done = dl.next_chunk()
                 with open(destino, "wb") as f:
-                    f.write(buffer.getvalue())
+                    f.write(buf.getvalue())
                 logging.info(f"✅ Guardado: {destino}")
             else:
                 logging.warning("❌ No se encontró 'CONTRAENTREGA.mp3' en CONTRAENTREGA.")
         else:
             logging.warning("❌ No se encontró la carpeta 'CONTRAENTREGA'.")
+
+        # ------------------------------------------------------------------
+        # PRECIO  (descarga TODO lo que haya, ej. precio.mp3)
+        # ------------------------------------------------------------------
+        logging.info("📂 [Audio Precio] Buscando en 'PRECIO'…")
+        precio = service.files().list(
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'PRECIO' "
+              f"and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id,name)", pageSize=1
+        ).execute().get("files", [])
+
+        if precio:
+            carpeta_id = precio[0]["id"]
+            audios = service.files().list(
+                q=f"'{carpeta_id}' in parents and mimeType contains 'audio/' and trashed = false",
+                fields="files(id,name)"
+            ).execute().get("files", [])
+            for audio in audios:
+                destino = os.path.join(carpeta_precio, audio["name"])
+                request = service.files().get_media(fileId=audio["id"])
+                buf, dl = io.BytesIO(), MediaIoBaseDownload(buf, request)
+                done = False
+                while not done:
+                    _, done = dl.next_chunk()
+                with open(destino, "wb") as f:
+                    f.write(buf.getvalue())
+                logging.info(f"✅ Guardado: {destino}")
+        else:
+            logging.warning("❌ No se encontró la carpeta 'PRECIO'.")
+
+        # ------------------------------------------------------------------
+        # REALIZAR COMPRA  (descarga TODO, ej. compra.mp3)
+        # ------------------------------------------------------------------
+        logging.info("📂 [Audio Realizar Compra] Buscando en 'REALIZAR COMPRA'…")
+        realizar = service.files().list(
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'REALIZAR COMPRA' "
+              f"and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id,name)", pageSize=1
+        ).execute().get("files", [])
+
+        if realizar:
+            carpeta_id = realizar[0]["id"]
+            audios = service.files().list(
+                q=f"'{carpeta_id}' in parents and mimeType contains 'audio/' and trashed = false",
+                fields="files(id,name)"
+            ).execute().get("files", [])
+            for audio in audios:
+                destino = os.path.join(carpeta_realizar_compra, audio["name"])
+                request = service.files().get_media(fileId=audio["id"])
+                buf, dl = io.BytesIO(), MediaIoBaseDownload(buf, request)
+                done = False
+                while not done:
+                    _, done = dl.next_chunk()
+                with open(destino, "wb") as f:
+                    f.write(buf.getvalue())
+                logging.info(f"✅ Guardado: {destino}")
+        else:
+            logging.warning("❌ No se encontró la carpeta 'REALIZAR COMPRA'.")
 
         print(">>> descargar_audios_bienvenida_drive() – finalizado")
 
