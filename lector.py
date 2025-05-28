@@ -408,13 +408,13 @@ def descargar_audios_bienvenida_drive() -> None:
         print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
         logging.error(f"❌ Error al descargar audios: {e}")
 
-# ─── Descarga del video de confianza desde Drive ─────────────────────────────
+# ─── Descarga de todos los videos de confianza desde Drive ─────────────────────────────
 CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
 
 def descargar_video_confianza():
     """
-    Descarga el archivo .mp4 desde la carpeta 'Video de confianza' en Google Drive.
-    Guarda el archivo en /var/data/videos/video_confianza.mp4 si aún no existe.
+    Descarga todos los archivos .mp4 desde la carpeta 'Video de confianza' en Google Drive.
+    Guarda los archivos en /var/data/videos/ sin sobrescribir si ya existen.
     """
     try:
         print(">>> descargar_video_confianza() – iniciando")
@@ -424,43 +424,45 @@ def descargar_video_confianza():
         logging.info("📂 [Video Confianza] Iniciando descarga desde Drive…")
         logging.info(f"🆔 Carpeta Drive: {CARPETA_VIDEO_CONFIANZA_DRIVE}")
 
-        # Buscar archivo .mp4 en la carpeta
+        # Buscar todos los archivos .mp4 en la carpeta
         archivos = service.files().list(
             q=f"'{CARPETA_VIDEO_CONFIANZA_DRIVE}' in parents and mimeType='video/mp4' and trashed = false",
             fields="files(id, name)",
-            pageSize=1
+            pageSize=20
         ).execute().get("files", [])
 
         if not archivos:
             logging.warning("⚠️ No se encontró ningún video .mp4 en la carpeta de confianza.")
             return
 
-        archivo = archivos[0]
-        nombre_archivo = "video_confianza.mp4"
-        ruta_destino = os.path.join("/var/data/videos", nombre_archivo)
+        for archivo in archivos:
+            nombre_archivo = archivo["name"]
+            ruta_destino = os.path.join("/var/data/videos", nombre_archivo)
 
-        if os.path.exists(ruta_destino):
-            logging.info(f"📦 Ya existe: {nombre_archivo} — se omite descarga.")
-            return
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre_archivo} — se omite descarga.")
+                continue
 
-        logging.info(f"⬇️ Descargando video: {nombre_archivo}")
-        request = service.files().get_media(fileId=archivo["id"])
-        buffer = io.BytesIO()
-        downloader = MediaIoBaseDownload(buffer, request)
+            logging.info(f"⬇️ Descargando video: {nombre_archivo}")
+            request = service.files().get_media(fileId=archivo["id"])
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
 
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
 
-        with open(ruta_destino, "wb") as f:
-            f.write(buffer.getvalue())
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
 
-        logging.info(f"✅ Video guardado: {ruta_destino}")
+            logging.info(f"✅ Video guardado: {ruta_destino}")
+
         print(">>> descargar_video_confianza() – finalizado")
 
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
-        logging.error(f"❌ Error descargando video de confianza: {e}")
+        logging.error(f"❌ Error descargando videos de confianza: {e}")
+
 
 # ─── Carpeta general de Drive donde está el modelos.json ─────────────────────
 CARPETA_DRIVE_GENERAL = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"  # Carpeta 'Memoria General'
@@ -1211,40 +1213,48 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
 
 def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
-    Detecta el modelo DS-xxx y luego el color exacto o sinónimo sin repetir comparaciones.
+    Detecta el modelo DS-xxx y luego el color exacto o sinónimo,
+    pero solo si existe una línea con ese patrón.
     """
     import unicodedata
 
-    # 🔠 Normalizar texto
-    texto_limpio = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-    texto_limpio = texto_limpio.replace("X", " CON ").replace("-", "")  # Reemplaza X por CON y quita guiones
+    # 🔠 Separar y normalizar líneas
+    lineas = texto.splitlines()
+    lineas = [unicodedata.normalize("NFKD", l).encode("ascii", "ignore").decode("utf-8").upper() for l in lineas]
 
-    for item in memoria_modelos:
-        modelo = item.get("modelo", "")
-        marca = item.get("marca", "DS")
-        color = item.get("color", "").upper()
-        alias_color = item.get("sinonimos_color", [color])
+    for linea in lineas:
+        # 🔁 Limpieza de caracteres
+        linea_limpia = linea.replace("-", "").replace("X", " CON ").replace("_", " ").strip()
+        linea_limpia_sin_espacios = linea_limpia.replace(" ", "")
 
-        # 🧠 Acepta DS279 o DS 279
-        if f"DS{modelo}" in texto_limpio.replace(" ", ""):
-            for alias in alias_color:
-                alias_limpio = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper()
-                alias_limpio = alias_limpio.replace("-", "").replace("X", " CON ").replace("  ", " ").strip()
+        for item in memoria_modelos:
+            modelo = item.get("modelo", "")
+            marca = item.get("marca", "DS")
+            color = item.get("color", "").upper()
+            alias_color = item.get("sinonimos_color", [color])
 
-                if alias_limpio in texto_limpio:
-                    print(f"🧠 MATCH: modelo {modelo}, alias '{alias_limpio}'")
-                    return {
-                        "modelo": modelo,
-                        "color": color,
-                        "marca": marca,
-                        "type": "text",
-                        "text": (
-                            f"✅ Perfecto, tomaremos *{marca} {modelo} {color.title()}*.\n"
-                            "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* del zapato que usas normalmente 👟."
-                        )
-                    }
+            if f"DS{modelo}" in linea_limpia_sin_espacios:
+                for alias in alias_color:
+                    alias_limpio = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper()
+                    alias_limpio = alias_limpio.replace("-", "").replace("X", " CON ").replace("  ", " ").strip()
+
+                    if alias_limpio in linea_limpia:
+                        print(f"🧠 MATCH LINEA → {linea}")
+                        print(f"🧠 modelo: {modelo} — alias: {alias_limpio}")
+
+                        return {
+                            "modelo": modelo,
+                            "color": color,
+                            "marca": marca,
+                            "type": "text",
+                            "text": (
+                                f"✅ Perfecto, tomaremos *{marca} {modelo} {color.title()}*.\n"
+                                "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* del zapato que usas normalmente 👟."
+                            )
+                        }
 
     return None
+
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2496,30 +2506,31 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "no voy a arriesgar mi dinero"
     ]
 
-     # 🟥 Desconfianza: envía video + audio de confianza
+    # 🟥 Desconfianza: envía videos + audio de confianza
     if any(frase in texto_normalizado for frase in frases_desconfianza):
-        video_path = "/var/data/videos/video_confianza.mp4"
+        carpeta_videos = "/var/data/videos"
         audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
 
         mensajes = [{
             "type": "text",
-            "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria."
+            "text": "🤝 Entendemos tu preocupación. Te compartimos estos videos para que veas que somos una tienda real y seria."
         }]
 
-        if os.path.exists(video_path):
-            with open(video_path, "rb") as f:
-                mensajes.append({
-                    "type": "video",
-                    "base64": base64.b64encode(f.read()).decode("utf-8"),
-                    "mimetype": "video/mp4",
-                    "filename": "video_confianza.mp4",
-                    "text": "🎥 Mira este video corto de confianza:"
-                })
-        else:
-            mensajes.append({
-                "type": "text",
-                "text": "📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!"
-            })
+        # Añadir todos los videos de confianza que existan en la carpeta
+        for archivo in sorted(os.listdir(carpeta_videos)):
+            if archivo.lower().endswith(".mp4"):
+                ruta_video = os.path.join(carpeta_videos, archivo)
+                try:
+                    with open(ruta_video, "rb") as f:
+                        mensajes.append({
+                            "type": "video",
+                            "base64": base64.b64encode(f.read()).decode("utf-8"),
+                            "mimetype": "video/mp4",
+                            "filename": archivo,
+                            "text": f"🎥 Mira este video de confianza: {archivo}"
+                        })
+                except Exception as e:
+                    logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
 
         if os.path.exists(audio_path):
             with open(audio_path, "rb") as f:
@@ -2533,6 +2544,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         await reanudar_fase_actual(cid, ctx, est)
         return {"type": "multi", "messages": mensajes}
+
 
     # 🟨 Detección universal de color — funciona en cualquier fase
     try:
@@ -4351,12 +4363,12 @@ async def responder_con_openai(mensaje_usuario):
                         "Nuestros productos son 100% colombianos y hechos en Bucaramanga.\n\n"
                         "Tu objetivo principal es:\n"
                         "- Si preguntan por precio di, dime qué referencia exacta buscas.\n"
-                        "- Siempre que puedas, pide la referencia del teni.\n"
+                        "- Siempre que puedas, pregunta que color le gusto.\n"
                         "- Pide que envíe una imagen del zapato que busca 📸.\n"
-                        "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
+                        "Siempre que puedas, invita amablemente a enviar  una imagen para agilizar el pedido o que preguntar que color le llamo la atencion.\n"
                         "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100 y todo es unisex.\n\n"
                         "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
-                        "- '¿Me puedes enviar la referencia del modelo que te interesa? 📋✨'\n"
+                        "- '¿Dime que color te gusto yo te ayudo✨'\n"
                         "- '¿Quieres enviarme una imagen para ayudarte mejor? 📸'\n\n"
                         "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
                         "Actúa como un asesor de ventas que siempre busca ayudar al cliente y cerrar la compra de manera rápida, amigable y eficiente."
