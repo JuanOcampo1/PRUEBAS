@@ -1307,41 +1307,43 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
-
 def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
-    Detecta el modelo y color con base en coincidencias de texto OCR
-    usando una memoria con modelos + sinónimos de color.
+    Detecta el modelo DS-xxx y luego el mejor color aproximado entre los colores definidos para ese modelo.
     """
 
-    import re
-    import unicodedata
+    # 🔠 Normalizar texto OCR
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
 
-    # 1️⃣ Normalizar texto completo
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    mejor_match = None
+    mejor_score = 0
 
     for item in memoria_modelos:
         modelo = item.get("modelo", "")
-        marca = item.get("marca", "DS")
         color = item.get("color", "").upper()
         alias_color = item.get("sinonimos_color", [])
 
-        # Buscar coincidencia con DS-modelo
+        # 🔍 Paso 1: detectar modelo
         if f"DS-{modelo}" in texto or f"DS{modelo}" in texto:
             for alias in alias_color:
-                if alias.upper() in texto:
-                    return {
+                alias_norm = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
+                score = SequenceMatcher(None, alias_norm, texto).ratio()
+
+                if score > mejor_score:
+                    mejor_score = score
+                    mejor_match = {
                         "modelo": modelo,
                         "color": color,
-                        "marca": marca,
+                        "marca": "DS",  # fija
                         "type": "text",
                         "text": (
-                            f"✅ Perfecto, tomaremos *{marca} {modelo} {color.title()}*.\n"
+                            f"✅ Perfecto, tomaremos *DS {modelo} {color.title()}*.\n"
                             "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* del zapato que usas normalmente 👟."
                         )
                     }
 
-    return None
+    return mejor_match if mejor_score > 0.4 else None
+
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -5453,19 +5455,20 @@ async def venom_webhook(req: Request):
                         f.write(img_bytes)
 
                     texto_ocr = extraer_texto_comprobante(path_img)
+
+                    # 👇 Usa inventario como memoria de modelos
                     respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
 
                     if respuesta_ocr:
-                        modelo_match = re.search(r"Los (\d{3})", respuesta_ocr["text"])
-                        color_match = re.search(r"color ([A-ZÑ ]+)", respuesta_ocr["text"])
-
-                        if modelo_match:
-                            est["modelo"] = modelo_match.group(1)
-                        if color_match:
-                            est["color"] = color_match.group(1).strip().title()
-
-                        est["fase"] = "imagen_detectada"
+                        est.update({
+                            "modelo": respuesta_ocr["modelo"],
+                            "color": respuesta_ocr["color"],
+                            "marca": "DS",
+                            "fase": "imagen_detectada"
+                        })
                         estado_usuario[cid] = est
+
+                        os.remove(path_img)  # 🔥 Limpieza de imagen temporal
 
                         return JSONResponse(respuesta_ocr)
 
