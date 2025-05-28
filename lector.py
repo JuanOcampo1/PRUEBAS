@@ -567,37 +567,35 @@ def descargar_video_confianza():
         logging.error(f"❌ Error descargando video de confianza: {e}")
 
 
-CARPETA_MEMORIA_CIUDADES = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"
-
-def descargar_memoria_ciudades():
+def descargar_memoria_modelos():
     """
-    Descarga el archivo ciudades.json desde la carpeta 'Memoria ciudades' en Drive.
-    Guarda el archivo en /var/data/ciudades/ciudades.json si aún no existe.
+    Descarga el archivo modelos.json desde la carpeta 'Memoria ciudades' en Drive.
+    Guarda el archivo en /var/data/modelos/modelos.json si aún no existe.
     """
     try:
-        print(">>> descargar_memoria_ciudades() – iniciando")
+        print(">>> descargar_memoria_modelos() – iniciando")
         service = get_drive_service()
-        os.makedirs("/var/data/ciudades", exist_ok=True)
+        os.makedirs("/var/data/modelos", exist_ok=True)
 
-        logging.info("📂 [Memoria Ciudades] Iniciando descarga desde Drive…")
+        logging.info("📂 [Memoria Modelos] Iniciando descarga desde Drive…")
         logging.info(f"🆔 Carpeta Drive: {CARPETA_MEMORIA_CIUDADES}")
 
-        # Buscar archivo ciudades.json en la carpeta
+        # Buscar archivo modelos.json en la carpeta
         archivos = service.files().list(
-            q=f"'{CARPETA_MEMORIA_CIUDADES}' in parents and name = 'ciudades.json' and trashed = false",
+            q=f"'{CARPETA_MEMORIA_CIUDADES}' in parents and name = 'modelos.json' and trashed = false",
             fields="files(id, name)",
             pageSize=1
         ).execute().get("files", [])
 
         if not archivos:
-            logging.warning("⚠️ No se encontró 'ciudades.json' en la carpeta Memoria ciudades.")
+            logging.warning("⚠️ No se encontró 'modelos.json' en la carpeta Memoria modelos.")
             return
 
         archivo = archivos[0]
-        ruta_destino = "/var/data/ciudades/ciudades.json"
+        ruta_destino = "/var/data/modelos/modelos.json"
 
         if os.path.exists(ruta_destino):
-            logging.info("📦 Ya existe 'ciudades.json' — se omite descarga.")
+            logging.info("📦 Ya existe 'modelos.json' — se omite descarga.")
             return
 
         logging.info(f"⬇️ Descargando: {archivo['name']}")
@@ -613,11 +611,12 @@ def descargar_memoria_ciudades():
             f.write(buffer.getvalue())
 
         logging.info(f"✅ Archivo guardado: {ruta_destino}")
-        print(">>> descargar_memoria_ciudades() – finalizado")
+        print(">>> descargar_memoria_modelos() – finalizado")
 
     except Exception as e:
-        print(">>> EXCEPCIÓN en descargar_memoria_ciudades:", e)
-        logging.error(f"❌ Error descargando 'ciudades.json': {e}")
+        print(">>> EXCEPCIÓN en descargar_memoria_modelos:", e)
+        logging.error(f"❌ Error descargando 'modelos.json': {e}")
+
 
 def descargar_stickers_drive():
     """
@@ -1308,76 +1307,42 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
-import re
-import unicodedata
 
-import re
-import unicodedata
+def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
+    """
+    Detecta el modelo y color con base en coincidencias de texto OCR
+    usando una memoria con modelos + sinónimos de color.
+    """
 
-def detectar_modelo_color(texto: str, inventario: list) -> dict:
-    """
-    Extrae el modelo (número) y color solo de la línea que contiene 'DS-',
-    arma la respuesta bonita: "¡Qué buena elección! Los 279 de color VERDE NEON..."
-    """
     import re
     import unicodedata
 
-    # Normalizar líneas
-    lineas = texto.splitlines()
-    lineas = [unicodedata.normalize("NFKD", l).encode("ascii", "ignore").decode("utf-8").upper() for l in lineas]
+    # 1️⃣ Normalizar texto completo
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
 
-    # Buscar línea que tenga DS-
-    linea_modelo = next((l for l in lineas if "DS-" in l), None)
-    if not linea_modelo:
-        return None
+    for item in memoria_modelos:
+        modelo = item.get("modelo", "")
+        marca = item.get("marca", "DS")
+        color = item.get("color", "").upper()
+        alias_color = item.get("sinonimos_color", [])
 
-    # Buscar DS-xxx y lo que sigue
-    match = re.search(r"DS-?(\d{3})\s*([A-Z ]+)?", linea_modelo)
-    if not match:
-        return None
+        # Buscar coincidencia con DS-modelo
+        if f"DS-{modelo}" in texto or f"DS{modelo}" in texto:
+            for alias in alias_color:
+                if alias.upper() in texto:
+                    return {
+                        "modelo": modelo,
+                        "color": color,
+                        "marca": marca,
+                        "type": "text",
+                        "text": (
+                            f"✅ Perfecto, tomaremos *{marca} {modelo} {color.title()}*.\n"
+                            "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* del zapato que usas normalmente 👟."
+                        )
+                    }
 
-    modelo_num = match.group(1)  # '279'
-    after_modelo = match.group(2) or ""
-    after_modelo = after_modelo.replace("UNISEX", "").strip()
+    return None
 
-    # Buscar color en inventario que esté en after_modelo
-    colores_disponibles = sorted({item["color"].upper() for item in inventario}, key=len, reverse=True)
-    color_detectado = next((color for color in colores_disponibles if color in after_modelo), None)
-
-    # Si no está en after_modelo, buscar en toda la línea o en texto
-    if not color_detectado:
-        for color in colores_disponibles:
-            if color in linea_modelo or color in texto.upper():
-                color_detectado = color
-                break
-
-    # Buscar el producto exacto
-    coincidencia = next(
-        (
-            item for item in inventario
-            if modelo_num in item["modelo"] and (not color_detectado or color_detectado == item["color"].upper())
-        ),
-        None
-    )
-
-    if not coincidencia:
-        return None
-
-    modelo = coincidencia["modelo"]
-    color = coincidencia["color"]
-    precio = coincidencia["precio"]
-
-    return {
-        "modelo": modelo_num,    # <-- AÑADE esto
-        "color": color,          # <-- Y esto
-        "type": "text",
-        "text": (
-            f"🟢 ¡Qué buena elección! Los {modelo_num} de color {color.upper()} están brutales 😎.\n"
-            f"💲 Su precio es: {precio:,.0f} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-            f"🎁 Hoy tienes 5 % de descuento si pagas ahora.\n\n"
-            f"¿Seguimos con la compra?"
-        )
-    }
 
 def extraer_texto_comprobante(path: str) -> str:
     try:
@@ -2924,48 +2889,45 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
-        lineas_ocr = texto_ocr.splitlines()
 
-        for linea in lineas_ocr:
-            linea = linea.strip()
-            linea = re.sub(r"(DS[-_]?\d{3})([A-Z])", r"\1 \2", linea.upper())  # ← arregla DS279Unisex
+        try:
+            with open("/var/data/modelos/modelos.json", "r", encoding="utf-8") as f_json:
+                memoria_modelos = json.load(f_json)
+        except Exception as e:
+            logging.warning(f"❌ No se pudo cargar memoria modelos: {e}")
+            memoria_modelos = []
 
-            match = re.search(r"(DS[-_]?\s*\d{3})\s+([A-ZÁÉÍÓÚÑ ]+)", linea)
-            if match:
-                modelo_raw = match.group(1).replace("_", "-").replace(" ", "").upper()
-                color_raw = match.group(2).strip().upper()
+        resultado = detectar_modelo_color(texto_ocr, memoria_modelos)
 
-                modelo_solo = modelo_raw.replace("DS-", "").strip()
-                color_detectado = color_raw.strip()
+        if resultado:
+            modelo_solo = resultado["modelo"]
+            color_detectado = resultado["color"]
 
-                item = next(
-                    (i for i in inv if normalize(i["modelo"]) == normalize(modelo_solo)
-                     and normalize(i["color"]) == normalize(color_detectado)),
-                    None
+            item = next(
+                (i for i in inv if normalize(i["modelo"]) == normalize(modelo_solo)
+                 and normalize(i["color"]) == normalize(color_detectado)),
+                None
+            )
+
+            if item:
+                est.update({
+                    "marca": resultado["marca"],
+                    "modelo": modelo_solo,
+                    "color": color_detectado,
+                    "precio_total": item["precio"],
+                    "fase": "esperando_talla"
+                })
+                estado_usuario[cid] = est
+                os.remove(tmp)
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=resultado["text"],
+                    parse_mode="Markdown"
                 )
+                return
 
-                if item:
-                    est.update({
-                        "marca": "DS",
-                        "modelo": modelo_solo,
-                        "color": color_detectado,
-                        "precio_total": item["precio"],
-                        "fase": "esperando_talla"
-                    })
-                    estado_usuario[cid] = est
-                    os.remove(tmp)
-
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"✅ Perfecto, tomaremos *DS {modelo_solo} {color_detectado.title()}*.\n"
-                            "📸 Para confirmar la talla exacta, envíame una foto de la lengüeta del zapato que usas normalmente 👟."
-                        ),
-                        parse_mode="Markdown"
-                    )
-                    return
-
-        # 2️⃣ CLIP si OCR falló
+        # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
@@ -2996,6 +2958,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
 
 
