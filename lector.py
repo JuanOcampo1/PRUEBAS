@@ -1241,32 +1241,30 @@ def clasificar_saludo(texto: str) -> str:
     if any(p in texto for p in ["precio", "cuanto vale", "vale", "valen", "Precio", "cost"]):
         return "precio"
     return "general"
-
-async def enviar_welcome_venom(cid: str):
+async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
-        audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
+        if tipo == "precio":
+            audio_path = "/var/data/audios/precio/precio.mp3"
+        elif tipo == "comprar":
+            audio_path = "/var/data/audios/realizar_compra/compra.mp3"
+        else:
+            audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
 
-        existe = os.path.exists(audio_path)
-        logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {existe}")
-
-        if not existe:
+        if not os.path.exists(audio_path):
             raise FileNotFoundError(f"❌ No se encontró el archivo: {audio_path}")
 
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
-            b64_final = f"data:audio/mpeg;base64,{b64}"  # ✅ encabezado MIME agregado
-
-        logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
-        logging.info(f"🧪 Base64 preview: {b64[:80]}...")
+            b64_final = f"data:audio/mpeg;base64,{b64}"
 
         return {
             "type": "multi",
             "messages": [
                 {
                     "type": "audio",
-                    "base64": b64_final,  # ✅ ahora con encabezado
-                    "mimetype": "audio/mpeg",  # WhatsApp lo requiere así
-                    "filename": "bienvenida1.mp3",
+                    "base64": b64_final,
+                    "mimetype": "audio/mpeg",
+                    "filename": os.path.basename(audio_path),
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
                 {
@@ -1291,6 +1289,7 @@ async def enviar_welcome_venom(cid: str):
             "type": "text",
             "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
         }
+
 
 
 
@@ -1323,6 +1322,9 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
     Detecta el modelo DS-xxx y luego el mejor color aproximado entre los colores definidos para ese modelo.
     """
+    import unicodedata
+    from difflib import SequenceMatcher  # ✅ IMPORTANTE
+
     # 🔠 Normalizar texto OCR
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
 
@@ -1361,7 +1363,6 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
                     }
 
     return mejor_match if mejor_score > 0.4 else None
-
 
 
 def extraer_texto_comprobante(path: str) -> str:
