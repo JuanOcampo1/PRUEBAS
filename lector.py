@@ -1126,7 +1126,7 @@ EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
 def clasificar_saludo(texto: str) -> str:
     texto = texto.lower()
-    if any(p in texto for p in ["Realizar una compra", "quiero pedir", "hacer pedido", "hacer una compra", "ordenar"]):
+    if any(p in texto for p in ["Realizar una compra", "Como realizo una compra", "¿Cómo realizo una compra?", "hacer una compra", "ordenar"]):
         return "comprar"
     if any(p in texto for p in ["precio", "cuanto vale", "vale", "valen", "Precio", "cost"]):
         return "precio"
@@ -1210,50 +1210,36 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
 
 def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
-    Detecta el modelo DS-xxx y luego el mejor color aproximado entre los colores definidos para ese modelo.
+    Detecta el modelo DS-xxx y luego el color exacto o sinónimo sin repetir comparaciones.
     """
     import unicodedata
-    from difflib import SequenceMatcher  # ✅ IMPORTANTE
 
-    # 🔠 Normalizar texto OCR
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
-
-    mejor_match = None
-    mejor_score = 0
+    texto_limpio = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
 
     for item in memoria_modelos:
         modelo = item.get("modelo", "")
+        marca = item.get("marca", "DS")
         color = item.get("color", "").upper()
-        alias_color = item.get("sinonimos_color", [])
+        alias_color = item.get("sinonimos_color", [color])
 
-        # 🔍 Asegura que si no hay alias, use el color directo
-        if not alias_color:
-            alias_color = [color]
-
-        # Debug opcional para saber si está consultando bien
-        print(f"🧠 Consultando modelo {modelo} con sinónimos: {alias_color}")
-
-        # Paso 1: detectar modelo
-        if f"DS-{modelo}" in texto or f"DS{modelo}" in texto:
+        # Acepta DS-279 o DS279
+        if f"DS-{modelo}" in texto_limpio or f"DS{modelo}" in texto_limpio:
             for alias in alias_color:
-                alias_norm = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
-                score = SequenceMatcher(None, alias_norm, texto).ratio()
-
-                if score > mejor_score:
-                    mejor_score = score
-                    mejor_match = {
+                alias_limpio = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper()
+                if alias_limpio in texto_limpio:
+                    print(f"🧠 MATCH: modelo {modelo}, alias '{alias_limpio}'")
+                    return {
                         "modelo": modelo,
                         "color": color,
-                        "marca": "DS",  # fija
+                        "marca": marca,
                         "type": "text",
                         "text": (
-                            f"✅ Perfecto, tomaremos *DS {modelo} {color.title()}*.\n"
+                            f"✅ Perfecto, tomaremos *{marca} {modelo} {color.title()}*.\n"
                             "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* del zapato que usas normalmente 👟."
                         )
                     }
 
-    return mejor_match if mejor_score > 0.4 else None
-
+    return None
 
 def extraer_texto_comprobante(path: str) -> str:
     try:
