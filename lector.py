@@ -1213,17 +1213,20 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
 
 def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
-    Detecta el modelo DS-xxx y luego el color exacto o sinónimo,
-    pero solo si existe una línea con ese patrón.
+    Detecta el modelo DS-xxx y luego busca el color más similar (no exacto),
+    pero solo si existe una línea que contenga ese patrón.
     """
     import unicodedata
+    from difflib import SequenceMatcher
+
+    def similitud(a, b):
+        return SequenceMatcher(None, a, b).ratio()
 
     # 🔠 Separar y normalizar líneas
     lineas = texto.splitlines()
     lineas = [unicodedata.normalize("NFKD", l).encode("ascii", "ignore").decode("utf-8").upper() for l in lineas]
 
     for linea in lineas:
-        # 🔁 Limpieza de caracteres
         linea_limpia = linea.replace("-", "").replace("X", " CON ").replace("_", " ").strip()
         linea_limpia_sin_espacios = linea_limpia.replace(" ", "")
 
@@ -1238,9 +1241,10 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
                     alias_limpio = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper()
                     alias_limpio = alias_limpio.replace("-", "").replace("X", " CON ").replace("  ", " ").strip()
 
-                    if alias_limpio in linea_limpia:
+                    score = similitud(alias_limpio, linea_limpia)
+                    if score > 0.65:
                         print(f"🧠 MATCH LINEA → {linea}")
-                        print(f"🧠 modelo: {modelo} — alias: {alias_limpio}")
+                        print(f"🧠 modelo: {modelo} — alias: {alias_limpio} — similitud: {score:.2f}")
 
                         return {
                             "modelo": modelo,
@@ -1254,7 +1258,6 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
                         }
 
     return None
-
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2516,9 +2519,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "text": "🤝 Entendemos tu preocupación. Te compartimos estos videos para que veas que somos una tienda real y seria."
         }]
 
-        # Añadir todos los videos de confianza que existan en la carpeta
+        # ✅ Lista exacta de videos válidos
+        videos_confianza = {
+            "video_confianza.mp4",
+            "WhatsApp Video 2025-05-28 at 4.26.50 PM.mp4"
+        }
+
         for archivo in sorted(os.listdir(carpeta_videos)):
-            if archivo.lower().endswith(".mp4"):
+            if archivo in videos_confianza:
                 ruta_video = os.path.join(carpeta_videos, archivo)
                 try:
                     with open(ruta_video, "rb") as f:
@@ -2527,7 +2535,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             "base64": base64.b64encode(f.read()).decode("utf-8"),
                             "mimetype": "video/mp4",
                             "filename": archivo,
-                            "text": f"🎥 Mira este video de confianza: {archivo}"
+                            "text": f"🎥 Mira este video de confianza:"
                         })
                 except Exception as e:
                     logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
@@ -2815,20 +2823,20 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         resultado = detectar_modelo_color(texto_ocr, memoria_modelos)
 
         if resultado:
-            modelo_solo = resultado["modelo"]
-            color_detectado = resultado["color"]
+            modelo_solo = normalize(resultado["modelo"])
+            color_detectado = normalize(resultado["color"])
 
             item = next(
-                (i for i in inv if normalize(i["modelo"]) == normalize(modelo_solo)
-                 and normalize(i["color"]) == normalize(color_detectado)),
+                (i for i in inv if normalize(i["modelo"]) == modelo_solo
+                 and normalize(i["color"]) == color_detectado),
                 None
             )
 
             if item:
                 est.update({
                     "marca": resultado["marca"],
-                    "modelo": modelo_solo,
-                    "color": color_detectado,
+                    "modelo": resultado["modelo"],
+                    "color": resultado["color"],
                     "precio_total": item["precio"],
                     "fase": "esperando_talla"
                 })
@@ -2873,8 +2881,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
-
-
 
 
 
@@ -5375,14 +5381,21 @@ async def venom_webhook(req: Request):
 
                     texto_ocr = extraer_texto_comprobante(path_img)
 
-                    # 👇 Usa inventario como memoria de modelos
-                    respuesta_ocr = detectar_modelo_color(texto_ocr, inv)
+                    # 🧠 Cargar memoria modelos
+                    try:
+                        with open("/var/data/modelos/modelos.json", "r", encoding="utf-8") as f_json:
+                            memoria_modelos = json.load(f_json)
+                    except Exception as e:
+                        logging.warning(f"❌ No se pudo cargar memoria modelos: {e}")
+                        memoria_modelos = []
+
+                    respuesta_ocr = detectar_modelo_color(texto_ocr, memoria_modelos)
 
                     if respuesta_ocr:
                         est.update({
                             "modelo": respuesta_ocr["modelo"],
                             "color": respuesta_ocr["color"],
-                            "marca": "DS",
+                            "marca": respuesta_ocr["marca"],
                             "fase": "imagen_detectada"
                         })
                         estado_usuario[cid] = est
@@ -5393,6 +5406,7 @@ async def venom_webhook(req: Request):
 
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
+
 
                 # 🧠 CLIP - identificación de modelo
                 try:
