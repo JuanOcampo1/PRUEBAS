@@ -567,9 +567,11 @@ def descargar_video_confianza():
         logging.error(f"❌ Error descargando video de confianza: {e}")
 
 
+CARPETA_DRIVE_GENERAL = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # carpeta única que contiene modelos.json
+
 def descargar_memoria_ciudades():
     """
-    Descarga el archivo modelos.json desde la carpeta 'Memoria ciudades' en Drive.
+    Descarga el archivo modelos.json desde la carpeta general en Drive.
     Guarda el archivo en /var/data/modelos/modelos.json si aún no existe.
     """
     try:
@@ -578,17 +580,16 @@ def descargar_memoria_ciudades():
         os.makedirs("/var/data/modelos", exist_ok=True)
 
         logging.info("📂 [Memoria Modelos] Iniciando descarga desde Drive…")
-        logging.info(f"🆔 Carpeta Drive: {CARPETA_MEMORIA_CIUDADES}")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_DRIVE_GENERAL}")
 
-        # Buscar archivo modelos.json en la carpeta
         archivos = service.files().list(
-            q=f"'{CARPETA_MEMORIA_CIUDADES}' in parents and name = 'modelos.json' and trashed = false",
+            q=f"'{CARPETA_DRIVE_GENERAL}' in parents and name = 'modelos.json' and trashed = false",
             fields="files(id, name)",
             pageSize=1
         ).execute().get("files", [])
 
         if not archivos:
-            logging.warning("⚠️ No se encontró 'modelos.json' en la carpeta Memoria modelos.")
+            logging.warning("⚠️ No se encontró 'modelos.json' en la carpeta.")
             return
 
         archivo = archivos[0]
@@ -616,6 +617,7 @@ def descargar_memoria_ciudades():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_memoria_modelos:", e)
         logging.error(f"❌ Error descargando 'modelos.json': {e}")
+
 
 
 def descargar_stickers_drive():
@@ -1232,6 +1234,14 @@ SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
+def clasificar_saludo(texto: str) -> str:
+    texto = texto.lower()
+    if any(p in texto for p in ["Realizar una compra", "quiero pedir", "hacer pedido", "hacer una compra", "ordenar"]):
+        return "comprar"
+    if any(p in texto for p in ["precio", "cuanto vale", "vale", "valen", "Precio", "cost"]):
+        return "precio"
+    return "general"
+
 async def enviar_welcome_venom(cid: str):
     try:
         audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
@@ -1307,11 +1317,12 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+
+
 def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
     Detecta el modelo DS-xxx y luego el mejor color aproximado entre los colores definidos para ese modelo.
     """
-
     # 🔠 Normalizar texto OCR
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
 
@@ -1323,7 +1334,14 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
         color = item.get("color", "").upper()
         alias_color = item.get("sinonimos_color", [])
 
-        # 🔍 Paso 1: detectar modelo
+        # 🔍 Asegura que si no hay alias, use el color directo
+        if not alias_color:
+            alias_color = [color]
+
+        # Debug opcional para saber si está consultando bien
+        print(f"🧠 Consultando modelo {modelo} con sinónimos: {alias_color}")
+
+        # Paso 1: detectar modelo
         if f"DS-{modelo}" in texto or f"DS{modelo}" in texto:
             for alias in alias_color:
                 alias_norm = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper().replace(" ", "")
@@ -5108,7 +5126,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         usuarios_saludo_enviado.add(cid)    # ← Importante
         estado_usuario[cid] = est
 
-        bienvenida = await enviar_welcome_venom(cid)
+        tipo_saludo = clasificar_saludo(txt)          # ← usa el primer mensaje del cliente
+        bienvenida  = await enviar_welcome_venom(cid, tipo_saludo)
+
         bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
         audio_msg = next((m for m in bienvenida_msgs if m.get("type") == "audio"), None)
         otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
@@ -5130,11 +5150,13 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 path = os.path.join(carpeta, nombre)
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
-                texto = nombres_con_emojis.get(nombre, f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}")
+                texto_video = nombres_con_emojis.get(
+                    nombre, f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                )
                 videos.append({
                     "type": "video",
                     "base64": f"data:video/mp4;base64,{b64}",
-                    "text": texto
+                    "text": texto_video
                 })
 
             if videos:
@@ -5173,11 +5195,13 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     # 4️⃣ Filtro: si no se ha enviado el welcome_text, no responder a nada más
     if not est.get("welcome_enviado") and cid not in usuarios_saludo_enviado:
-        saludos_pasivos = {"hola", "hola!", "holaa", "buenos dias", "buenos días", "buenas tardes", "buenas noches"}
+        saludos_pasivos = {
+            "hola", "hola!", "holaa", "buenos dias", "buenos días",
+            "buenas tardes", "buenas noches"
+        }
         if texto.strip() in saludos_pasivos:
             return {"type": "text", "text": ""}
         return {"type": "text", "text": ""}
-
 
 
     # 🔊 Petición de audio
