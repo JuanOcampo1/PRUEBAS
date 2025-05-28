@@ -567,7 +567,7 @@ def descargar_video_confianza():
         logging.error(f"❌ Error descargando video de confianza: {e}")
 
 
-def descargar_memoria_modelos():
+def descargar_memoria_ciudades():
     """
     Descarga el archivo modelos.json desde la carpeta 'Memoria ciudades' en Drive.
     Guarda el archivo en /var/data/modelos/modelos.json si aún no existe.
