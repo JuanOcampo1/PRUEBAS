@@ -462,6 +462,8 @@ def descargar_video_confianza():
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
         logging.error(f"❌ Error descargando video de confianza: {e}")
 
+# ─── Carpeta general de Drive donde está el modelos.json ─────────────────────
+CARPETA_DRIVE_GENERAL = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"  # Carpeta 'Memoria General'
 
 def descargar_memoria_ciudades():
     """
