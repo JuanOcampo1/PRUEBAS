@@ -1207,14 +1207,15 @@ def enviar_correo(dest, subj, body):
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
 
-
 def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
     """
     Detecta el modelo DS-xxx y luego el color exacto o sinónimo sin repetir comparaciones.
     """
     import unicodedata
 
+    # 🔠 Normalizar texto
     texto_limpio = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    texto_limpio = texto_limpio.replace("X", " CON ").replace("-", "")  # Reemplaza X por CON y quita guiones
 
     for item in memoria_modelos:
         modelo = item.get("modelo", "")
@@ -1222,10 +1223,12 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
         color = item.get("color", "").upper()
         alias_color = item.get("sinonimos_color", [color])
 
-        # Acepta DS-279 o DS279
-        if f"DS-{modelo}" in texto_limpio or f"DS{modelo}" in texto_limpio:
+        # 🧠 Acepta DS279 o DS 279
+        if f"DS{modelo}" in texto_limpio.replace(" ", ""):
             for alias in alias_color:
                 alias_limpio = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper()
+                alias_limpio = alias_limpio.replace("-", "").replace("X", " CON ").replace("  ", " ").strip()
+
                 if alias_limpio in texto_limpio:
                     print(f"🧠 MATCH: modelo {modelo}, alias '{alias_limpio}'")
                     return {
@@ -1240,6 +1243,7 @@ def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
                     }
 
     return None
+
 
 def extraer_texto_comprobante(path: str) -> str:
     try:
