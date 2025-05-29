@@ -2838,6 +2838,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
 
+        # ✅ Cargar carpetas desde Drive (para validación directa)
+        carpetas_en_drive = listar_carpetas_drive()
+
         resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
@@ -2867,6 +2870,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
                 return
+
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
         with open(tmp, "rb") as f_img:
@@ -5399,7 +5403,8 @@ async def venom_webhook(req: Request):
 
                     texto_ocr = extraer_texto_comprobante(path_img)
 
-                    # ✅ Usar nombres de carpetas de Drive en vez de modelos.json
+                    # ✅ Cargar carpetas desde Drive antes de intentar OCR
+                    carpetas_en_drive = listar_carpetas_drive()
                     respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
                     if respuesta_ocr:
