@@ -91,25 +91,21 @@ def obtener_inventario():
     except Exception as e:
         logging.error(f"❌ Error cargando inventario: {e}")
         return []
-
 def registrar_en_embudo(est, telefono, ultimo_mensaje):
     try:
+        import os
+        if not os.path.exists("GOOGLE_CREDS_JSON"):
+            logging.warning("⚠️ No se encontró GOOGLE_CREDS_JSON. Saltando registro en embudo.")
+            return
+
         import gspread
-        import os, json
         from datetime import datetime
         from oauth2client.service_account import ServiceAccountCredentials
 
         logging.info(f"📊 Iniciando registro en EMBUDO para: {telefono}")
 
-        scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive'
-        ]
-
-        # ✅ Usar GOOGLE_CREDS_JSON desde las variables de entorno
-        creds_json = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
-
+        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_name("GOOGLE_CREDS_JSON", scope)
         client = gspread.authorize(creds)
         hoja = client.open("EMBUDO").sheet1
 
@@ -146,6 +142,7 @@ def registrar_en_embudo(est, telefono, ultimo_mensaje):
 
     except Exception as e:
         logging.error(f"❌ Error al registrar en EMBUDO: {e}")
+
 
 
 
@@ -4537,23 +4534,21 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     txt   = texto
     globals()["texto"] = texto
 
-    mtype = ""  # ✅ Corregido: evita NameError si más adelante se usa
+    mtype = ""  # ✅ Corregido: evita NameError
 
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
         estado_usuario[cid] = {
-            "fase": "inicio",
+            "fase": "inicio",                # ⬅️ NO CAMBIES A fase 1 aún
             "esperando_nombre": True,
-            "welcome_enviado": False  # ✅ ← ESTADO NUEVO
+            "welcome_enviado": False
         }
 
-        # 📌 Apenas el usuario escribe por primera vez, registramos teléfono y fase 1
         est = estado_usuario[cid]
-        est["fase"] = "fase 1"
-        registrar_en_embudo(est, cid, body)
+        registrar_en_embudo(est, cid, body)  # ⬅️ Se registra igual desde ya
 
-    # ✅ Asegura que est esté definido siempre
+    # ✅ Siempre asegurar que esté cargado
     est = estado_usuario[cid]
 
     # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
