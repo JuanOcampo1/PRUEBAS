@@ -84,6 +84,18 @@ def get_drive_service():
  
     return build("drive", "v3", credentials=creds)
 
+def normalizar_texto(texto):
+    """
+    Normaliza el texto para facilitar comparaciones.
+    - Quita tildes
+    - Convierte a mayúsculas
+    - Elimina signos de puntuación
+    """
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
+    texto = texto.upper()
+    texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
+    return texto.strip()
+
 def registrar_o_actualizar_lead(data: dict) -> bool:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -937,10 +949,6 @@ def comparar_embeddings_clip(embedding_cliente: np.ndarray, embeddings_dict: dic
 
     return mejor_modelo, mejor_score
 
-# ————————————————————————————————————————————————————————————————
-# 🔍 Comparar imagen del cliente con base de modelos
-
-
 # ──────────────────────────────────────────────────────────
 # 🔧  Helper: normaliza y verifica que el vector tenga 512 dim
 def _a_unit(vec) -> np.ndarray:
@@ -1280,36 +1288,34 @@ def listar_carpetas_drive():
     return carpetas
 
 
-
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
-    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
-    Ejemplo carpeta: DS_305_VERDE LIMON
-    Coincidencia robusta: al menos 2 palabras del color deben coincidir (ignorando ruido).
+    Detecta modelo y color desde OCR, haciendo match estricto por modelo
+    y permitiendo que el color de la carpeta esté dentro del texto OCR (aunque haya más colores).
     """
     import re
     import unicodedata
 
-    # Normaliza y limpia texto OCR
+    # 1. Normaliza texto OCR
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-    texto = texto.replace("-", " ").replace("_", " ")
-    texto_limpio = re.sub(r"[^A-Z ]", " ", texto)  # quita símbolos raros como "X"
-    palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
+    texto = texto.replace("-", " ").replace("_", " ").replace(" X ", " ")
+    texto_limpio = re.sub(r"[^A-Z ]", " ", texto)
+    palabras_ocr = set(p for p in texto_limpio.split() if p not in {"Y", "X", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
+    # 2. Buscar carpeta que coincida modelo + color
     for carpeta in carpetas_drive:
-        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 304 CELESTE
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
             color = " ".join(partes[2:])
-            color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
+            color_tokens = set(p for p in color.split() if p not in {"Y", "X", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
-            # Validar modelo exacto
+            # Validar modelo exacto (DS 304 o DS304)
             if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                # Coincidencia más exigente de color (mínimo 2 palabras del color)
-                coinciden = palabras_ocr & color_tokens
-                if len(coinciden) >= 2:
+                # Basta con que TODAS las palabras del color estén en el OCR (aunque haya más)
+                if color_tokens.issubset(palabras_ocr):
                     return {
                         "modelo": modelo,
                         "color": color,
@@ -1319,6 +1325,7 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
                     }
 
     return None
+
 
 
 
