@@ -1212,7 +1212,25 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
 
 
-def cargar_carpetas_drive():
+from datetime import datetime, timedelta
+
+# Variables de caché
+_carpetas_cache = None
+_ultima_actualizacion = None
+
+def listar_carpetas_drive():
+    """
+    Lista los nombres de carpetas en Google Drive dentro de una carpeta raíz.
+    Usa caché para evitar llamadas innecesarias durante 10 minutos.
+    """
+    global _carpetas_cache, _ultima_actualizacion
+    ahora = datetime.utcnow()
+
+    if _carpetas_cache is not None and _ultima_actualizacion is not None:
+        if (ahora - _ultima_actualizacion) < timedelta(minutes=10):
+            return _carpetas_cache  # Devuelve caché si aún es válida
+
+    # Si no hay cache o expiró, recargar desde Drive
     from googleapiclient.discovery import build
     import os, json
     from google.oauth2 import service_account
@@ -1225,27 +1243,29 @@ def cargar_carpetas_drive():
     service = build('drive', 'v3', credentials=creds)
     folder_id = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'
 
-    def obtener_nombres_carpetas_drive(folder_id: str, service) -> list:
-        carpetas = []
-        page_token = None
-        while True:
-            response = service.files().list(
-                q=f"'{folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-                spaces='drive',
-                fields='nextPageToken, files(id, name)',
-                pageToken=page_token
-            ).execute()
+    carpetas = []
+    page_token = None
+    while True:
+        response = service.files().list(
+            q=f"'{folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            spaces='drive',
+            fields='nextPageToken, files(id, name)',
+            pageToken=page_token
+        ).execute()
 
-            for file in response.get('files', []):
-                carpetas.append(file['name'])
+        for file in response.get('files', []):
+            carpetas.append(file['name'])
 
-            page_token = response.get('nextPageToken', None)
-            if page_token is None:
-                break
+        page_token = response.get('nextPageToken', None)
+        if page_token is None:
+            break
 
-        return carpetas
+    # Guardar resultado en caché
+    _carpetas_cache = carpetas
+    _ultima_actualizacion = ahora
 
-    return obtener_nombres_carpetas_drive(folder_id, service)
+    return carpetas
+
 
 
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
