@@ -84,47 +84,52 @@ def get_drive_service():
  
     return build("drive", "v3", credentials=creds)
 
-from datetime import datetime
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
 def registrar_en_embudo(est, telefono, ultimo_mensaje):
-    # Autenticación con Google Sheets
-    scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name("google_creds.json", scope)
-    client = gspread.authorize(creds)
-    hoja = client.open("EMBUDO").sheet1  # Asegúrate de que se llama así
+    try:
+        import gspread
+        from datetime import datetime
+        from oauth2client.service_account import ServiceAccountCredentials
 
-    # Buscar si ya está registrado
-    telefonos = hoja.col_values(1)  # Columna "Teléfono"
-    hoy = datetime.now().strftime("%Y-%m-%d %H:%M")
+        logging.info(f"📊 Iniciando registro en EMBUDO para: {telefono}")
 
-    fila_existente = None
-    for idx, tel in enumerate(telefonos):
-        if tel == telefono:
-            fila_existente = idx + 1
-            break
+        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_name("google_creds.json", scope)
+        client = gspread.authorize(creds)
+        hoja = client.open("EMBUDO").sheet1
 
-    # Preparar los datos a registrar
-    datos = [
-        telefono,
-        hoy,
-        est.get("nombre", ""),
-        est.get("modelo", ""),
-        est.get("color", ""),
-        est.get("talla", ""),
-        est.get("correo", ""),
-        est.get("fase", ""),
-        ultimo_mensaje,
-        est.get("estado", "activo")
-    ]
+        telefonos = hoja.col_values(1)
+        hoy = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    if fila_existente:
-        # Ya existe, actualizamos toda la fila
-        hoja.update(f"A{fila_existente}:J{fila_existente}", [datos])
-    else:
-        # No existe, agregamos nueva fila
-        hoja.append_row(datos)
+        fila_existente = None
+        for idx, tel in enumerate(telefonos):
+            if tel == telefono:
+                fila_existente = idx + 1
+                break
+
+        datos = [
+            telefono,
+            hoy,
+            est.get("nombre", ""),
+            est.get("modelo", ""),
+            est.get("color", ""),
+            est.get("talla", ""),
+            est.get("correo", ""),
+            est.get("fase", ""),
+            ultimo_mensaje,
+            est.get("estado", "activo")
+        ]
+
+        if fila_existente:
+            logging.info(f"✏️ Actualizando fila {fila_existente} para {telefono}")
+            hoja.update(f"A{fila_existente}:J{fila_existente}", [datos])
+        else:
+            logging.info(f"🆕 Agregando nueva fila para {telefono}")
+            hoja.append_row(datos)
+
+        logging.info("✅ Registro en hoja EMBUDO completado.")
+
+    except Exception as e:
+        logging.error(f"❌ Error al registrar en EMBUDO: {e}")
 
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
@@ -1269,19 +1274,17 @@ def listar_carpetas_drive():
 
 
 
-def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
+def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
     """
-    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
-    Ejemplo carpeta: DS_305_VERDE LIMON
-    Coincidencia robusta: al menos 2 palabras del color deben coincidir (ignorando ruido).
+    Detecta modelo y color desde texto OCR comparando con carpetas de Drive.
+    Si encuentra match, responde con mensaje estructurado con precio y sigue el flujo.
     """
     import re
     import unicodedata
 
-    # Normaliza y limpia texto OCR
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
     texto = texto.replace("-", " ").replace("_", " ")
-    texto_limpio = re.sub(r"[^A-Z ]", " ", texto)  # quita símbolos raros como "X"
+    texto_limpio = re.sub(r"[^A-Z0-9 ]", " ", texto)
     palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
     for carpeta in carpetas_drive:
@@ -1293,20 +1296,34 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
             color = " ".join(partes[2:])
             color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
-            # Validar modelo exacto
             if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                # Coincidencia más exigente de color (mínimo 2 palabras del color)
-                coinciden = palabras_ocr & color_tokens
-                if len(coinciden) >= 2:
+                if len(palabras_ocr & color_tokens) >= 2:
+                    # Buscar precio
+                    item = next(
+                        (i for i in inventario if
+                         i.get("marca", "").upper() == "DS" and
+                         i.get("modelo", "").upper() == modelo and
+                         i.get("color", "").upper() == color),
+                        None
+                    )
+
+                    precio = item["precio"] if item else "no disponible"
+
                     return {
                         "modelo": modelo,
                         "color": color,
                         "marca": "DS",
                         "type": "text",
-                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                        "text": (
+                            f"🟢 ¡Qué buena elección! Los *DS{modelo}* de color *{color}* están brutales 😎.\n"
+                            f"💲 Su precio es: *{precio}* COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                            "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            "¿Seguimos con la compra?"
+                        )
                     }
 
     return None
+
 
 
 
@@ -2863,41 +2880,44 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
 
-        # ✅ Cargar carpetas desde Drive (para validación directa)
+        # ✅ Cargar carpetas desde Drive
         carpetas_en_drive = listar_carpetas_drive()
 
-        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+        # 🔍 Buscar modelo y color usando OCR y nombres de carpetas
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)
 
         if resultado:
-            modelo_solo = normalize(resultado["modelo"])
-            color_detectado = normalize(resultado["color"])
+            # 💾 Guardar en memoria del cliente
+            est["marca"] = resultado["marca"]
+            est["modelo"] = resultado["modelo"]
+            est["color"] = resultado["color"]
 
+            # 🔢 Buscar precio
             item = next(
-                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
+                (i for i in inv if
+                 normalize(i["modelo"]) == normalize(resultado["modelo"]) and
+                 normalize(i["color"]) == normalize(resultado["color"])),
                 None
             )
 
             if item:
-                est.update({
-                    "marca": resultado["marca"],
-                    "modelo": resultado["modelo"],
-                    "color": resultado["color"],
-                    "precio_total": item["precio"],
-                    "fase": "esperando_talla"
-                })
-                estado_usuario[cid] = est
-                os.remove(tmp)
+                est["precio_total"] = item["precio"]
+                est["fase"] = "esperando_talla"
+                estado_usuario[cid] = est  # actualizar estado global
 
-                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
-                precio = item["precio"]
+                # 📊 Registrar en EMBUDO
+                registrar_en_embudo(est, cid, texto_ocr)
+
+                os.remove(tmp)
 
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
-                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                        f"🟢 ¡Qué buena elección! Los *{resultado['marca']}{resultado['modelo']}* "
+                        f"de color *{resultado['color']}* están brutales 😎.\n"
+                        f"💲 Su precio es: {item['precio']:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
                         f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"¿Seguimos con la compra?"
+                        f"📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
                     ),
                     parse_mode="Markdown"
                 )
@@ -4505,13 +4525,16 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = {
             "fase": "inicio",
             "esperando_nombre": True,
-            "welcome_enviado": False  # ✅ ← ESTA ES LA LÍNEA CLAVE
+            "welcome_enviado": False  # ✅ ← ESTADO NUEVO
         }
 
         # 📌 Apenas el usuario escribe por primera vez, registramos teléfono y fase 1
         est = estado_usuario[cid]
         est["fase"] = "fase 1"
         registrar_en_embudo(est, cid, body)
+
+    # ✅ Asegura que est esté definido siempre
+    est = estado_usuario[cid]
 
     # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
     try:
@@ -4525,7 +4548,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # 2️⃣ Segundo intento simple: "Juan de Medellín"
         if not match_dual:
-            match_dual = re.search(r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})", texto_limpio)
+            match_dual = re.search(
+                r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                texto_limpio
+            )
 
         if match_dual:
             nombre_detectado = match_dual.group(1).strip().title()
@@ -4539,6 +4565,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
             else:
                 logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
 
