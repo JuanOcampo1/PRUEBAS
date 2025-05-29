@@ -4416,8 +4416,6 @@ def normalizar_texto(texto):
     texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.strip()
 
-texto_normalizado = normalizar_texto(texto)
-
 # --------------------------------------------------------------------
 
 nest_asyncio.apply()
@@ -4504,7 +4502,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     texto = (body or "").lower()
     txt   = texto
     globals()["texto"] = texto
-
+    texto_normalizado = normalizar_texto(texto)
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
