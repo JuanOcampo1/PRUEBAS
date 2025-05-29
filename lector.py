@@ -4413,15 +4413,6 @@ async def manejar_precio(update, ctx, inventario):
         )
         return True
 
-# 🔧 Normalizar texto antes de los FAQ
-def normalizar_texto(texto):
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
-    texto = texto.upper()
-    texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
-    return texto.strip()
-
-texto_normalizado = normalizar_texto(texto)
-
 # --------------------------------------------------------------------
 
 nest_asyncio.apply()
@@ -4806,6 +4797,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
+    # 🔧 Normalizar texto antes de los FAQ
+    texto_normalizado = normalizar_texto(texto)
+
     # FAQ: ¿Por qué tan caros?
     if any(p in texto_normalizado for p in (
         "POR QUE TAN CAROS", "PORQUE TAN CARO", "PORQUE TAN COSTOSO", "ES MUY CARO", "MUY COSTOSO"
@@ -4838,9 +4832,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
+            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4849,7 +4843,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "COSIDOS.mp3",
+                "filename": "COSIDAS.mp3",
                 "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
             }
 
@@ -4859,6 +4853,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
     # FAQ: Redes sociales
     if any(p in texto_normalizado for p in (
         "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB", "PÁGINA WEB",
@@ -4883,9 +4878,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "SUELA DE CAUCHO", "ES DE CAUCHO", "LA SUELA ES DE", "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
     )):
         try:
-            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
+            ruta_audio = "/var/data/audios/caucho/caucho.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4894,7 +4889,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "CAUCHO.mp3",
+                "filename": "caucho.mp3",
                 "text": "👟 Te explicamos de qué material es la suela:"
             }
 
@@ -4904,6 +4899,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
 
 
     texto = texto.lower()
