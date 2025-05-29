@@ -84,56 +84,48 @@ def get_drive_service():
  
     return build("drive", "v3", credentials=creds)
 
-def registrar_o_actualizar_lead(data: dict) -> bool:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-    try:
-        logging.info("[LEADS] ⇢ Intentando registrar o actualizar lead...")
-        logging.info(f"[LEADS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+def registrar_en_embudo(est, telefono, ultimo_mensaje):
+    # Autenticación con Google Sheets
+    scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_name("google_creds.json", scope)
+    client = gspread.authorize(creds)
+    hoja = client.open("EMBUDO").sheet1  # Asegúrate de que se llama así
 
-        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
+    # Buscar si ya está registrado
+    telefonos = hoja.col_values(1)  # Columna "Teléfono"
+    hoy = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        sheet = client.open("PEDIDOS").worksheet("LEADS")
-        telefono = data.get("Teléfono", "").strip()
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fila_existente = None
+    for idx, tel in enumerate(telefonos):
+        if tel == telefono:
+            fila_existente = idx + 1
+            break
 
-        if not telefono:
-            logging.warning("[LEADS] ⚠️ Teléfono vacío. No se puede registrar.")
-            return False
+    # Preparar los datos a registrar
+    datos = [
+        telefono,
+        hoy,
+        est.get("nombre", ""),
+        est.get("modelo", ""),
+        est.get("color", ""),
+        est.get("talla", ""),
+        est.get("correo", ""),
+        est.get("fase", ""),
+        ultimo_mensaje,
+        est.get("estado", "activo")
+    ]
 
-        registros = sheet.col_values(1)  # Columna A: Teléfono
-        logging.info(f"[LEADS] 🔍 Total de registros existentes: {len(registros)}")
+    if fila_existente:
+        # Ya existe, actualizamos toda la fila
+        hoja.update(f"A{fila_existente}:J{fila_existente}", [datos])
+    else:
+        # No existe, agregamos nueva fila
+        hoja.append_row(datos)
 
-        fila_data = [
-            telefono,
-            data.get("Fecha Registro", fecha),
-            data.get("Nombre", ""),
-            data.get("Producto", ""),
-            data.get("Color", ""),
-            data.get("Talla", ""),
-            data.get("Correo", ""),
-            data.get("Fase", ""),
-            data.get("Último Mensaje", ""),
-            data.get("Estado", "")
-        ]
-
-        if telefono in registros:
-            fila_index = registros.index(telefono) + 1
-            sheet.update(f"A{fila_index}:J{fila_index}", [fila_data])
-            logging.info(f"[LEADS] 🔁 Lead actualizado (fila {fila_index})")
-        else:
-            sheet.append_row(fila_data)
-            logging.info("[LEADS] ✅ Lead registrado por primera vez")
-
-        return True
-
-    except Exception as e:
-        logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
-        return False
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
 
@@ -4409,14 +4401,16 @@ async def manejar_precio(update, ctx, inventario):
         )
         return True
 
-# 🔧 Normalizar texto antes de los FAQ
 def normalizar_texto(texto):
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
     texto = texto.upper()
-    texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
+    texto = re.sub(r"[^\w\s]", "", texto)
     return texto.strip()
 
+# Asegúrate de definir texto antes de usarlo
+texto = "mensaje de prueba o body.lower()"  # 👈 aquí pon el valor real del texto que estás normalizando
 texto_normalizado = normalizar_texto(texto)
+
 
 # --------------------------------------------------------------------
 
@@ -4514,7 +4508,11 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "welcome_enviado": False  # ✅ ← ESTA ES LA LÍNEA CLAVE
         }
 
-    est = estado_usuario[cid]
+        # 📌 Apenas el usuario escribe por primera vez, registramos teléfono y fase 1
+        est = estado_usuario[cid]
+        est["fase"] = "fase 1"
+        registrar_en_embudo(est, cid, body)
+
     # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
     try:
         texto_limpio = texto.strip().lower()
