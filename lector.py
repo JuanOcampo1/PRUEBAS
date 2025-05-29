@@ -5147,6 +5147,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
         logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
+        # 🖼️🎬🎧 Detectar si el primer mensaje fue multimedia
+        is_media_inicial = any([
+            mtype in {"image", "video", "audio"},
+            mimetype.startswith(("image/", "video/", "audio/")),
+            getattr(dummy_msg, "photo", False),
+            getattr(dummy_msg, "video", False),
+            getattr(dummy_msg, "audio", False)
+        ])
 
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
