@@ -67,6 +67,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 estado_usuario = {}
 usuarios_saludo_enviado = set()
+_carpetas_cache = None  # ← esto evita que falle listar_carpetas_drive()
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -83,6 +84,13 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
+def obtener_inventario():
+    try:
+        with open("inventario.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"❌ Error cargando inventario: {e}")
+        return []
 
 def registrar_en_embudo(est, telefono, ultimo_mensaje):
     try:
