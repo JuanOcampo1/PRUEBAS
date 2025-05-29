@@ -1271,7 +1271,7 @@ def listar_carpetas_drive():
     _carpetas_cache = carpetas
     return carpetas
 
-
+inv = obtener_inventario()
 
 
 def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
@@ -2869,6 +2869,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    inv = obtener_inventario()
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
@@ -5222,6 +5223,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude analizar la imagen. ¿Puedes enviarla de nuevo enfocando solo el zapato?"
             }
+    is_media_inicial = mtype in ("image", "video", "ptt", "audio", "document")
 
     # 3️⃣ Enviar welcome si no se ha enviado aún y no es media
     if est.get("fase") == "inicio" and not est.get("welcome_enviado") and not is_media_inicial:
