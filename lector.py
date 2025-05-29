@@ -91,59 +91,6 @@ def obtener_inventario():
     except Exception as e:
         logging.error(f"❌ Error cargando inventario: {e}")
         return []
-def registrar_en_embudo(est, telefono, ultimo_mensaje):
-    try:
-        import os
-        if not os.path.exists("GOOGLE_CREDS_JSON"):
-            logging.warning("⚠️ No se encontró GOOGLE_CREDS_JSON. Saltando registro en embudo.")
-            return
-
-        import gspread
-        from datetime import datetime
-        from oauth2client.service_account import ServiceAccountCredentials
-
-        logging.info(f"📊 Iniciando registro en EMBUDO para: {telefono}")
-
-        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_name("GOOGLE_CREDS_JSON", scope)
-        client = gspread.authorize(creds)
-        hoja = client.open("EMBUDO").sheet1
-
-        telefonos = hoja.col_values(1)
-        hoy = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        fila_existente = None
-        for idx, tel in enumerate(telefonos):
-            if tel == telefono:
-                fila_existente = idx + 1
-                break
-
-        datos = [
-            telefono,
-            hoy,
-            est.get("nombre", ""),
-            est.get("modelo", ""),
-            est.get("color", ""),
-            est.get("talla", ""),
-            est.get("correo", ""),
-            est.get("fase", ""),
-            ultimo_mensaje,
-            est.get("estado", "activo")
-        ]
-
-        if fila_existente:
-            logging.info(f"✏️ Actualizando fila {fila_existente} para {telefono}")
-            hoja.update(f"A{fila_existente}:J{fila_existente}", [datos])
-        else:
-            logging.info(f"🆕 Agregando nueva fila para {telefono}")
-            hoja.append_row(datos)
-
-        logging.info("✅ Registro en hoja EMBUDO completado.")
-
-    except Exception as e:
-        logging.error(f"❌ Error al registrar en EMBUDO: {e}")
-
-
 
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
@@ -2895,48 +2842,46 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
 
-        # ✅ Cargar carpetas desde Drive
+        # ✅ Cargar carpetas desde Drive (para validación directa)
         carpetas_en_drive = listar_carpetas_drive()
 
-        # 🔍 Buscar modelo y color usando OCR y nombres de carpetas
-        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
-            # 💾 Guardar en memoria del cliente
-            est["marca"] = resultado["marca"]
-            est["modelo"] = resultado["modelo"]
-            est["color"] = resultado["color"]
+            modelo_solo = normalize(resultado["modelo"])
+            color_detectado = normalize(resultado["color"])
 
-            # 🔢 Buscar precio
             item = next(
-                (i for i in inv if
-                 normalize(i["modelo"]) == normalize(resultado["modelo"]) and
-                 normalize(i["color"]) == normalize(resultado["color"])),
+                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
                 None
             )
 
             if item:
-                est["precio_total"] = item["precio"]
-                est["fase"] = "esperando_talla"
-                estado_usuario[cid] = est  # actualizar estado global
-
-                # 📊 Registrar en EMBUDO
-                registrar_en_embudo(est, cid, texto_ocr)
-
+                est.update({
+                    "marca": resultado["marca"],
+                    "modelo": resultado["modelo"],
+                    "color": resultado["color"],
+                    "precio_total": item["precio"],
+                    "fase": "esperando_talla"
+                })
+                estado_usuario[cid] = est
                 os.remove(tmp)
+
+                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
+                precio = item["precio"]
 
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        f"🟢 ¡Qué buena elección! Los *{resultado['marca']}{resultado['modelo']}* "
-                        f"de color *{resultado['color']}* están brutales 😎.\n"
-                        f"💲 Su precio es: {item['precio']:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
                         f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                        f"¿Seguimos con la compra?"
                     ),
                     parse_mode="Markdown"
                 )
                 return
+
 
 
 
@@ -4534,23 +4479,16 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     txt   = texto
     globals()["texto"] = texto
 
-    mtype = ""  # ✅ Corregido: evita NameError
-
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
         estado_usuario[cid] = {
-            "fase": "inicio",                # ⬅️ NO CAMBIES A fase 1 aún
+            "fase": "inicio",
             "esperando_nombre": True,
-            "welcome_enviado": False
+            "welcome_enviado": False  # ✅ ← ESTA ES LA LÍNEA CLAVE
         }
 
-        est = estado_usuario[cid]
-        registrar_en_embudo(est, cid, body)  # ⬅️ Se registra igual desde ya
-
-    # ✅ Siempre asegurar que esté cargado
     est = estado_usuario[cid]
-
     # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
     try:
         texto_limpio = texto.strip().lower()
@@ -4560,6 +4498,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
             texto_limpio
         )
+
 
         # 2️⃣ Segundo intento simple: "Juan de Medellín"
         if not match_dual:
