@@ -83,13 +83,6 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
-def obtener_inventario():
-    try:
-        with open("inventario.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logging.error(f"❌ Error cargando inventario: {e}")
-        return []
 
 def registrar_en_embudo(est, telefono, ultimo_mensaje):
     try:
@@ -1278,7 +1271,7 @@ def listar_carpetas_drive():
     _carpetas_cache = carpetas
     return carpetas
 
-inv = obtener_inventario()
+
 
 
 def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
@@ -2876,7 +2869,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    inv = obtener_inventario()
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
@@ -2888,44 +2880,41 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
 
-        # ✅ Cargar carpetas desde Drive
+        # ✅ Cargar carpetas desde Drive (para validación directa)
         carpetas_en_drive = listar_carpetas_drive()
 
-        # 🔍 Buscar modelo y color usando OCR y nombres de carpetas
-        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
-            # 💾 Guardar en memoria del cliente
-            est["marca"] = resultado["marca"]
-            est["modelo"] = resultado["modelo"]
-            est["color"] = resultado["color"]
+            modelo_solo = normalize(resultado["modelo"])
+            color_detectado = normalize(resultado["color"])
 
-            # 🔢 Buscar precio
             item = next(
-                (i for i in inv if
-                 normalize(i["modelo"]) == normalize(resultado["modelo"]) and
-                 normalize(i["color"]) == normalize(resultado["color"])),
+                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
                 None
             )
 
             if item:
-                est["precio_total"] = item["precio"]
-                est["fase"] = "esperando_talla"
-                estado_usuario[cid] = est  # actualizar estado global
-
-                # 📊 Registrar en EMBUDO
-                registrar_en_embudo(est, cid, texto_ocr)
-
+                est.update({
+                    "marca": resultado["marca"],
+                    "modelo": resultado["modelo"],
+                    "color": resultado["color"],
+                    "precio_total": item["precio"],
+                    "fase": "esperando_talla"
+                })
+                estado_usuario[cid] = est
                 os.remove(tmp)
+
+                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
+                precio = item["precio"]
 
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        f"🟢 ¡Qué buena elección! Los *{resultado['marca']}{resultado['modelo']}* "
-                        f"de color *{resultado['color']}* están brutales 😎.\n"
-                        f"💲 Su precio es: {item['precio']:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
                         f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                        f"¿Seguimos con la compra?"
                     ),
                     parse_mode="Markdown"
                 )
@@ -4521,6 +4510,7 @@ async def manejar_catalogo(update, ctx):
 
     return False
 
+
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid   = str(cid)
     texto = (body or "").lower()
@@ -5230,7 +5220,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude analizar la imagen. ¿Puedes enviarla de nuevo enfocando solo el zapato?"
             }
-    is_media_inicial = mtype in ("image", "video", "ptt", "audio", "document")
 
     # 3️⃣ Enviar welcome si no se ha enviado aún y no es media
     if est.get("fase") == "inicio" and not est.get("welcome_enviado") and not is_media_inicial:
