@@ -1210,18 +1210,20 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+
 
 def cargar_carpetas_drive():
+    from googleapiclient.discovery import build
+    import os, json
+    from google.oauth2 import service_account
+
     SCOPES = ['https://www.googleapis.com/auth/drive']
-    
-    # Asegúrate de que el archivo está en tu ruta
-    creds = service_account.Credentials.from_service_account_file('credenciales.json', scopes=SCOPES)
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(os.getenv("GOOGLE_CREDS_JSON")), scopes=SCOPES
+    )
 
     service = build('drive', 'v3', credentials=creds)
-
-    folder_id = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # Tu carpeta raíz con los modelos
+    folder_id = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'
 
     def obtener_nombres_carpetas_drive(folder_id: str, service) -> list:
         carpetas = []
@@ -1245,8 +1247,6 @@ def cargar_carpetas_drive():
 
     return obtener_nombres_carpetas_drive(folder_id, service)
 
-# Esto te da la lista lista
-carpetas_en_drive = cargar_carpetas_drive()
 
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
