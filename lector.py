@@ -101,7 +101,7 @@ def registrar_en_embudo(est, telefono, ultimo_mensaje):
         logging.info(f"📊 Iniciando registro en EMBUDO para: {telefono}")
 
         scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_name("google_creds.json", scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_name("GOOGLE_CREDS_JSON", scope)
         client = gspread.authorize(creds)
         hoja = client.open("EMBUDO").sheet1
 
@@ -4527,6 +4527,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     texto = (body or "").lower()
     txt   = texto
     globals()["texto"] = texto
+
+    mtype = ""  # ✅ Corregido: evita NameError si más adelante se usa
 
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
