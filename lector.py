@@ -95,13 +95,21 @@ def obtener_inventario():
 def registrar_en_embudo(est, telefono, ultimo_mensaje):
     try:
         import gspread
+        import os, json
         from datetime import datetime
         from oauth2client.service_account import ServiceAccountCredentials
 
         logging.info(f"📊 Iniciando registro en EMBUDO para: {telefono}")
 
-        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_name("GOOGLE_CREDS_JSON", scope)
+        scope = [
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive'
+        ]
+
+        # ✅ Usar GOOGLE_CREDS_JSON desde las variables de entorno
+        creds_json = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+
         client = gspread.authorize(creds)
         hoja = client.open("EMBUDO").sheet1
 
@@ -138,6 +146,7 @@ def registrar_en_embudo(est, telefono, ultimo_mensaje):
 
     except Exception as e:
         logging.error(f"❌ Error al registrar en EMBUDO: {e}")
+
 
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
