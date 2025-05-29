@@ -1210,54 +1210,79 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
-def detectar_modelo_color(texto: str, memoria_modelos: list) -> dict:
+def cargar_carpetas_drive():
+    SCOPES = ['https://www.googleapis.com/auth/drive']
+    
+    # Asegúrate de que el archivo está en tu ruta
+    creds = service_account.Credentials.from_service_account_file('credenciales.json', scopes=SCOPES)
+
+    service = build('drive', 'v3', credentials=creds)
+
+    folder_id = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # Tu carpeta raíz con los modelos
+
+    def obtener_nombres_carpetas_drive(folder_id: str, service) -> list:
+        carpetas = []
+        page_token = None
+        while True:
+            response = service.files().list(
+                q=f"'{folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                spaces='drive',
+                fields='nextPageToken, files(id, name)',
+                pageToken=page_token
+            ).execute()
+
+            for file in response.get('files', []):
+                carpetas.append(file['name'])
+
+            page_token = response.get('nextPageToken', None)
+            if page_token is None:
+                break
+
+        return carpetas
+
+    return obtener_nombres_carpetas_drive(folder_id, service)
+
+# Esto te da la lista lista
+carpetas_en_drive = cargar_carpetas_drive()
+
+def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
-    Detecta el modelo DS-xxx y luego busca el color más similar (no exacto),
-    pero solo si existe una línea que contenga ese patrón.
+    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
+    Ejemplo carpeta: DS_305_VERDE LIMON
     """
+    import re
     import unicodedata
-    from difflib import SequenceMatcher
 
-    def similitud(a, b):
-        return SequenceMatcher(None, a, b).ratio()
+    # Normaliza texto
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    texto = texto.replace("-", " ").replace("_", " ")
 
-    # 🔠 Separar y normalizar líneas
-    lineas = texto.splitlines()
-    lineas = [unicodedata.normalize("NFKD", l).encode("ascii", "ignore").decode("utf-8").upper() for l in lineas]
+    for carpeta in carpetas_drive:
+        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        partes = nombre.split()
 
-    for linea in lineas:
-        linea_limpia = linea.replace("-", "").replace("X", " CON ").replace("_", " ").strip()
-        linea_limpia_sin_espacios = linea_limpia.replace(" ", "")
+        if len(partes) >= 3 and partes[0] == "DS":
+            modelo = partes[1]
+            color = " ".join(partes[2:])
 
-        for item in memoria_modelos:
-            modelo = item.get("modelo", "")
-            marca = item.get("marca", "DS")
-            color = item.get("color", "").upper()
-            alias_color = item.get("sinonimos_color", [color])
-
-            if f"DS{modelo}" in linea_limpia_sin_espacios:
-                for alias in alias_color:
-                    alias_limpio = unicodedata.normalize("NFKD", alias).encode("ascii", "ignore").decode("utf-8").upper()
-                    alias_limpio = alias_limpio.replace("-", "").replace("X", " CON ").replace("  ", " ").strip()
-
-                    score = similitud(alias_limpio, linea_limpia)
-                    if score > 0.65:
-                        print(f"🧠 MATCH LINEA → {linea}")
-                        print(f"🧠 modelo: {modelo} — alias: {alias_limpio} — similitud: {score:.2f}")
-
-                        return {
-                            "modelo": modelo,
-                            "color": color,
-                            "marca": marca,
-                            "type": "text",
-                            "text": (
-                                f"✅ Perfecto, tomaremos *{marca} {modelo} {color.title()}*.\n"
-                                "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta* del zapato que usas normalmente 👟."
-                            )
-                        }
+            # Requiere que el modelo esté presente exacto
+            if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
+                # Color con coincidencia suave
+                color_encontrado = any(pal in texto for pal in color.split())
+                if color_encontrado:
+                    return {
+                        "modelo": modelo,
+                        "color": color,
+                        "marca": "DS",
+                        "type": "text",
+                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                    }
 
     return None
+
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2813,14 +2838,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
 
-        try:
-            with open("/var/data/modelos/modelos.json", "r", encoding="utf-8") as f_json:
-                memoria_modelos = json.load(f_json)
-        except Exception as e:
-            logging.warning(f"❌ No se pudo cargar memoria modelos: {e}")
-            memoria_modelos = []
-
-        resultado = detectar_modelo_color(texto_ocr, memoria_modelos)
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
             modelo_solo = normalize(resultado["modelo"])
@@ -5381,15 +5399,8 @@ async def venom_webhook(req: Request):
 
                     texto_ocr = extraer_texto_comprobante(path_img)
 
-                    # 🧠 Cargar memoria modelos
-                    try:
-                        with open("/var/data/modelos/modelos.json", "r", encoding="utf-8") as f_json:
-                            memoria_modelos = json.load(f_json)
-                    except Exception as e:
-                        logging.warning(f"❌ No se pudo cargar memoria modelos: {e}")
-                        memoria_modelos = []
-
-                    respuesta_ocr = detectar_modelo_color(texto_ocr, memoria_modelos)
+                    # ✅ Usar nombres de carpetas de Drive en vez de modelos.json
+                    respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
                     if respuesta_ocr:
                         est.update({
@@ -5406,7 +5417,6 @@ async def venom_webhook(req: Request):
 
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
-
 
                 # 🧠 CLIP - identificación de modelo
                 try:
