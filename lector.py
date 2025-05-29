@@ -84,53 +84,56 @@ def get_drive_service():
  
     return build("drive", "v3", credentials=creds)
 
-def registrar_en_embudo(est, telefono, ultimo_mensaje):
+def registrar_o_actualizar_lead(data: dict) -> bool:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
     try:
-        import gspread
-        from datetime import datetime
-        from oauth2client.service_account import ServiceAccountCredentials
+        logging.info("[LEADS] ⇢ Intentando registrar o actualizar lead...")
+        logging.info(f"[LEADS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
-        logging.info(f"📊 Iniciando registro en EMBUDO para: {telefono}")
-
-        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_name("google_creds.json", scope)
+        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        hoja = client.open("EMBUDO").sheet1
 
-        telefonos = hoja.col_values(1)
-        hoy = datetime.now().strftime("%Y-%m-%d %H:%M")
+        sheet = client.open("PEDIDOS").worksheet("LEADS")
+        telefono = data.get("Teléfono", "").strip()
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        fila_existente = None
-        for idx, tel in enumerate(telefonos):
-            if tel == telefono:
-                fila_existente = idx + 1
-                break
+        if not telefono:
+            logging.warning("[LEADS] ⚠️ Teléfono vacío. No se puede registrar.")
+            return False
 
-        datos = [
+        registros = sheet.col_values(1)  # Columna A: Teléfono
+        logging.info(f"[LEADS] 🔍 Total de registros existentes: {len(registros)}")
+
+        fila_data = [
             telefono,
-            hoy,
-            est.get("nombre", ""),
-            est.get("modelo", ""),
-            est.get("color", ""),
-            est.get("talla", ""),
-            est.get("correo", ""),
-            est.get("fase", ""),
-            ultimo_mensaje,
-            est.get("estado", "activo")
+            data.get("Fecha Registro", fecha),
+            data.get("Nombre", ""),
+            data.get("Producto", ""),
+            data.get("Color", ""),
+            data.get("Talla", ""),
+            data.get("Correo", ""),
+            data.get("Fase", ""),
+            data.get("Último Mensaje", ""),
+            data.get("Estado", "")
         ]
 
-        if fila_existente:
-            logging.info(f"✏️ Actualizando fila {fila_existente} para {telefono}")
-            hoja.update(f"A{fila_existente}:J{fila_existente}", [datos])
+        if telefono in registros:
+            fila_index = registros.index(telefono) + 1
+            sheet.update(f"A{fila_index}:J{fila_index}", [fila_data])
+            logging.info(f"[LEADS] 🔁 Lead actualizado (fila {fila_index})")
         else:
-            logging.info(f"🆕 Agregando nueva fila para {telefono}")
-            hoja.append_row(datos)
+            sheet.append_row(fila_data)
+            logging.info("[LEADS] ✅ Lead registrado por primera vez")
 
-        logging.info("✅ Registro en hoja EMBUDO completado.")
+        return True
 
     except Exception as e:
-        logging.error(f"❌ Error al registrar en EMBUDO: {e}")
-
+        logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
+        return False
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
 
@@ -1274,17 +1277,19 @@ def listar_carpetas_drive():
 
 
 
-def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
+def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
-    Detecta modelo y color desde texto OCR comparando con carpetas de Drive.
-    Si encuentra match, responde con mensaje estructurado con precio y sigue el flujo.
+    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
+    Ejemplo carpeta: DS_305_VERDE LIMON
+    Coincidencia robusta: al menos 2 palabras del color deben coincidir (ignorando ruido).
     """
     import re
     import unicodedata
 
+    # Normaliza y limpia texto OCR
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
     texto = texto.replace("-", " ").replace("_", " ")
-    texto_limpio = re.sub(r"[^A-Z0-9 ]", " ", texto)
+    texto_limpio = re.sub(r"[^A-Z ]", " ", texto)  # quita símbolos raros como "X"
     palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
     for carpeta in carpetas_drive:
@@ -1296,34 +1301,20 @@ def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) ->
             color = " ".join(partes[2:])
             color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
+            # Validar modelo exacto
             if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                if len(palabras_ocr & color_tokens) >= 2:
-                    # Buscar precio
-                    item = next(
-                        (i for i in inventario if
-                         i.get("marca", "").upper() == "DS" and
-                         i.get("modelo", "").upper() == modelo and
-                         i.get("color", "").upper() == color),
-                        None
-                    )
-
-                    precio = item["precio"] if item else "no disponible"
-
+                # Coincidencia más exigente de color (mínimo 2 palabras del color)
+                coinciden = palabras_ocr & color_tokens
+                if len(coinciden) >= 2:
                     return {
                         "modelo": modelo,
                         "color": color,
                         "marca": "DS",
                         "type": "text",
-                        "text": (
-                            f"🟢 ¡Qué buena elección! Los *DS{modelo}* de color *{color}* están brutales 😎.\n"
-                            f"💲 Su precio es: *{precio}* COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                            "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                            "¿Seguimos con la compra?"
-                        )
+                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
                     }
 
     return None
-
 
 
 
@@ -4418,16 +4409,14 @@ async def manejar_precio(update, ctx, inventario):
         )
         return True
 
+# 🔧 Normalizar texto antes de los FAQ
 def normalizar_texto(texto):
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
     texto = texto.upper()
-    texto = re.sub(r"[^\w\s]", "", texto)
+    texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.strip()
 
-# Asegúrate de definir texto antes de usarlo
-texto = "mensaje de prueba o body.lower()"  # 👈 aquí pon el valor real del texto que estás normalizando
 texto_normalizado = normalizar_texto(texto)
-
 
 # --------------------------------------------------------------------
 
@@ -4510,7 +4499,6 @@ async def manejar_catalogo(update, ctx):
 
     return False
 
-
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid   = str(cid)
     texto = (body or "").lower()
@@ -4523,17 +4511,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = {
             "fase": "inicio",
             "esperando_nombre": True,
-            "welcome_enviado": False  # ✅ ← ESTADO NUEVO
+            "welcome_enviado": False  # ✅ ← ESTA ES LA LÍNEA CLAVE
         }
 
-        # 📌 Apenas el usuario escribe por primera vez, registramos teléfono y fase 1
-        est = estado_usuario[cid]
-        est["fase"] = "fase 1"
-        registrar_en_embudo(est, cid, body)
-
-    # ✅ Asegura que est esté definido siempre
     est = estado_usuario[cid]
-
     # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
     try:
         texto_limpio = texto.strip().lower()
@@ -4546,10 +4527,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # 2️⃣ Segundo intento simple: "Juan de Medellín"
         if not match_dual:
-            match_dual = re.search(
-                r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
-                texto_limpio
-            )
+            match_dual = re.search(r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})", texto_limpio)
 
         if match_dual:
             nombre_detectado = match_dual.group(1).strip().title()
@@ -4563,7 +4541,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
             else:
                 logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
-
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
 
