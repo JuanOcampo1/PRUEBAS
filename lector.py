@@ -312,39 +312,34 @@ def descargar_metodos_pago_drive():
 
     except Exception as e:
         logging.error(f"❌ Error descargando 'metodosdepago.jpeg': {e}")
-CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de “Audios”
-
-from googleapiclient.http import MediaIoBaseDownload
 
 CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de “Audios”
-
-from googleapiclient.http import MediaIoBaseDownload
 
 def descargar_audios_bienvenida_drive() -> None:
     """
-    Descarga audios desde las subcarpetas:
-        • BIENVENIDA          → /var/data/audios/bienvenida/
-        • CONFIANZA           → /var/data/audios/confianza/
-        • CONTRAENTREGA       → /var/data/audios/contraentrega/
-        • PRECIO              → /var/data/audios/precio/
-        • REALIZAR COMPRA     → /var/data/audios/realizar_compra/
+    Descarga audios desde las subcarpetas en Drive:
+        BIENVENIDA, CONFIANZA, CONTRAENTREGA, PRECIO, REALIZAR COMPRA,
+        CAROS, COSIDOS, CAUCHO → a /var/data/audios/<subcarpeta>
 
-    SIEMPRE los vuelve a descargar y sobrescribe lo que haya localmente.
-    Cuando el archivo descargado pesa < 1 KB lo descarta para evitar guardar audios corruptos.
+    Siempre vuelve a descargar y sobrescribe.
+    Archivos menores a 1 KB se descartan.
     """
     try:
         print(">>> descargar_audios_bienvenida_drive() – iniciando")
         service = get_drive_service()
 
-        carpetas_locales = {
+        carpetas_locales: Dict[str, str] = {
             "BIENVENIDA":        "/var/data/audios/bienvenida",
             "CONFIANZA":         "/var/data/audios/confianza",
             "CONTRAENTREGA":     "/var/data/audios/contraentrega",
             "PRECIO":            "/var/data/audios/precio",
-            "REALIZAR COMPRA":   "/var/data/audios/realizar_compra"
+            "REALIZAR COMPRA":   "/var/data/audios/realizar_compra",
+            "CAROS":             "/var/data/audios/caros",
+            "COSIDOS":           "/var/data/audios/cosidos",
+            "CAUCHO":            "/var/data/audios/caucho"
         }
 
-        # Crear carpetas locales (si no existen)
+        # Crear carpetas locales si no existen
         for ruta in carpetas_locales.values():
             os.makedirs(ruta, exist_ok=True)
 
@@ -1021,7 +1016,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-        if mejor_modelo and mejor_sim >= 0.75:
+        if mejor_modelo and mejor_sim >= 0.85:
             return f"✅ La imagen coincide con *{mejor_modelo}*"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -1127,14 +1122,29 @@ SMTP_SERVER           = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
+import unicodedata
+import re
+
+def normalizar(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
+    return texto.upper()
 
 def clasificar_saludo(texto: str) -> str:
-    texto = texto.lower()
-    if any(p in texto for p in ["Realizar una compra", "Como realizo una compra", "¿Cómo realizo una compra?", "hacer una compra", "ordenar"]):
+    texto = normalizar(texto)
+
+    # 🛒 Detectar intención de compra
+    if any(p in texto for p in [
+        "REALIZAR UNA COMPRA", "COMO REALIZO UNA COMPRA", "HACER UNA COMPRA", 
+        "ORDENAR", "QUIERO COMPRAR", "QUIERO UNO", "LO QUIERO"
+    ]):
         return "comprar"
-    if any(p in texto for p in ["precio", "cuanto vale", "vale", "valen", "Precio", "cost"]):
+
+    # 💰 Detectar si pregunta por precio (solo si es una pregunta)
+    if "?" in texto and any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
         return "precio"
+
     return "general"
+
 async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
         if tipo == "precio":
@@ -2868,8 +2878,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             color_detectado = normalize(resultado["color"])
 
             item = next(
-                (i for i in inv if normalize(i["modelo"]) == modelo_solo
-                 and normalize(i["color"]) == color_detectado),
+                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
                 None
             )
 
@@ -2884,12 +2893,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 estado_usuario[cid] = est
                 os.remove(tmp)
 
+                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
+                precio = item["precio"]
+
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=resultado["text"],
+                    text=(
+                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                        f"¿Seguimos con la compra?"
+                    ),
                     parse_mode="Markdown"
                 )
                 return
+
 
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
@@ -4530,6 +4548,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         return f"data:{tipo};base64,{b64}"
 
     # ─────────── Preguntas frecuentes (FAQ) ───────────
+
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
         # FAQ 1: ¿Cuánto demora el envío?
@@ -4764,6 +4783,84 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
+    # FAQ: ¿Por qué tan caros?
+    if any(p in texto for p in (
+        "por qué tan caros", "porque tan caro", "porque tan costoso", "es muy caro", "muy costoso"
+    )):
+        try:
+            ruta_audio = "/var/data/audios/caros/CAROS.mp3"
+            if not os.path.exists(ruta_audio):
+                raise FileNotFoundError("❌ No se encontró el audio CAROS.mp3")
+
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "audio",
+                "base64": b64,
+                "mimetype": "audio/mpeg",
+                "filename": "CAROS.mp3",
+                "text": "🎧 Aquí te explicamos por qué valen lo que valen:"
+            }
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando audio CAROS: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude enviar el audio en este momento."
+            }
+    # FAQ: ¿Son cosidos?
+    if any(p in texto for p in (
+        "son cosidos", "vienen cosidos", "estan cosidos", "cosido", "cosidos"
+    )):
+        try:
+            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
+            if not os.path.exists(ruta_audio):
+                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
+
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "audio",
+                "base64": b64,
+                "mimetype": "audio/mpeg",
+                "filename": "COSIDOS.mp3",
+                "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
+            }
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando audio COSIDOS: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude enviar el audio en este momento."
+            }
+    # FAQ: ¿La suela es de caucho?
+    if any(p in texto for p in (
+        "suela de caucho", "es de caucho", "la suela es de", "la suela de que es", "material de la suela"
+    )):
+        try:
+            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
+            if not os.path.exists(ruta_audio):
+                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
+
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "audio",
+                "base64": b64,
+                "mimetype": "audio/mpeg",
+                "filename": "CAUCHO.mp3",
+                "text": "👟 Te explicamos de qué material es la suela:"
+            }
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando audio CAUCHO: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude enviar el audio en este momento."
+            }
 
     texto = texto.lower()
 
@@ -5478,7 +5575,7 @@ async def venom_webhook(req: Request):
 
                     logging.info(f"[CLIP] Mejor modelo: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    if mejor_modelo and mejor_sim >= 0.75:
+                    if mejor_modelo and mejor_sim >= 0.85:
                         p = mejor_modelo.split("_")
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
