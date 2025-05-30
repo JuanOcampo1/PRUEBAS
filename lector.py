@@ -1140,11 +1140,12 @@ def clasificar_saludo(texto: str) -> str:
     ]):
         return "comprar"
 
-    # 💰 Detectar si pregunta por precio (solo si es una pregunta)
-    if "?" in texto and any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
+    # 💰 Detectar si habla de precio (con o sin signo de interrogación)
+    if any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
         return "precio"
 
     return "general"
+
 
 async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
@@ -1278,30 +1279,40 @@ def listar_carpetas_drive():
     return carpetas
 
 
-
 def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
     """
     Detecta modelo y color desde texto OCR comparando con carpetas de Drive.
     Si encuentra match, responde con mensaje estructurado con precio y sigue el flujo.
     """
+    import re
+    import unicodedata
 
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-    texto = texto.replace("-", " ").replace("_", " ")
-    texto_limpio = re.sub(r"[^A-Z0-9 ]", " ", texto)
-    palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
+    def normalizar(texto):
+        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+        texto = texto.replace("-", " ").replace("_", " ")
+        texto = re.sub(r"[^A-Z0-9 ]", " ", texto)
+        return texto
+
+    def limpiar_tokens(texto):
+        palabras = texto.split()
+        excluidas = {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"}
+        return set(p for p in palabras if p not in excluidas)
+
+    texto_normalizado = normalizar(texto)
+    palabras_ocr = limpiar_tokens(texto_normalizado)
 
     for carpeta in carpetas_drive:
-        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        nombre = normalizar(carpeta)
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
             color = " ".join(partes[2:])
-            color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
+            color_tokens = limpiar_tokens(color)
 
-            if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                if len(palabras_ocr & color_tokens) >= 2:
-                    # Buscar precio
+            # Match modelo exacto
+            if f"DS {modelo}" in texto_normalizado or f"DS{modelo}" in texto_normalizado:
+                if len(palabras_ocr & color_tokens) >= 1:  # permite coincidencias suaves
                     item = next(
                         (i for i in inventario if
                          i.get("marca", "").upper() == "DS" and
@@ -1309,7 +1320,6 @@ def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) ->
                          i.get("color", "").upper() == color),
                         None
                     )
-
                     precio = item["precio"] if item else "no disponible"
 
                     return {
@@ -1318,14 +1328,15 @@ def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) ->
                         "marca": "DS",
                         "type": "text",
                         "text": (
-                            f"🟢 ¡Qué buena elección! Los *DS{modelo}* de color *{color}* están brutales 😎.\n"
-                            f"💲 Su precio es: *{precio}* COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                            f"✅ Perfecto, tomaremos *DS {modelo}* de color *{color}*.\n"
+                            f"💲 Precio: *{precio}* COP con envío gratis 🚚.\n"
                             "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                             "¿Seguimos con la compra?"
                         )
                     }
 
     return None
+
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2884,14 +2895,17 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # ✅ Cargar carpetas desde Drive (para validación directa)
         carpetas_en_drive = listar_carpetas_drive()
 
-        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+        # 🔄 Asegúrate de tener el inventario cargado
+        inv = obtener_inventario()                     # ← añade esto si aún no lo tenías
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)  # ← ahora 3 args
 
         if resultado:
             modelo_solo = normalize(resultado["modelo"])
             color_detectado = normalize(resultado["color"])
 
             item = next(
-                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
+                (i for i in inv
+                 if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
                 None
             )
 
@@ -2914,8 +2928,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     text=(
                         f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
                         f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"¿Seguimos con la compra?"
+                        "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                        "¿Seguimos con la compra?"
                     ),
                     parse_mode="Markdown"
                 )
@@ -4795,6 +4809,24 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+    # FAQ: Redes sociales
+    if any(p in texto_normalizado for p in (
+        "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB", "PÁGINA WEB",
+        "TIENEN INSTAGRAM", "TIENEN FACEBOOK", "TIENEN TIKTOK", "COMO LOS ENCUENTRO EN REDES",
+        "SUS REDES", "SIGUEN EN REDES", "WEB"
+    )):
+        return {
+            "type": "text",
+            "text": (
+                "📲 ¡Claro! Aquí están todas nuestras redes y página oficial:\n\n"
+                "👟 *Instagram:* [@x100_col](https://www.instagram.com/x100_col)\n"
+                "📘 *Facebook:* [@x100col](https://www.facebook.com/x100col)\n"
+                "🎵 *TikTok:* [@x100_col](https://www.tiktok.com/@x100_col?_t=ZS-8wiexPh9ah6&_r=1)\n"
+                "🌐 *Página web:* [x100-col.com](https://www.x100-col.com/tienda/)\n\n"
+                "Síguenos para conocer nuevos modelos, promociones exclusivas y más 🔥💯"
+            ),
+            "parse_mode": "Markdown"
+        }
 
     # FAQ: ¿Por qué tan caros?
     if any(p in texto for p in (
