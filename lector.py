@@ -1291,60 +1291,37 @@ def listar_carpetas_drive():
     return carpetas
 
 
-def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
+def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
-    Detecta modelo y color desde texto OCR comparando con carpetas de Drive.
-    Si encuentra match, responde con mensaje estructurado con precio y sigue el flujo.
+    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
+    Ejemplo carpeta: DS_305_VERDE LIMON
     """
     import re
     import unicodedata
 
-    def normalizar(texto):
-        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-        texto = texto.replace("-", " ").replace("_", " ")
-        texto = re.sub(r"[^A-Z0-9 ]", " ", texto)
-        return texto
-
-    def limpiar_tokens(texto):
-        palabras = texto.split()
-        excluidas = {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"}
-        return set(p for p in palabras if p not in excluidas)
-
-    texto_normalizado = normalizar(texto)
-    palabras_ocr = limpiar_tokens(texto_normalizado)
+    # Normaliza texto
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    texto = texto.replace("-", " ").replace("_", " ")
 
     for carpeta in carpetas_drive:
-        nombre = normalizar(carpeta)
+        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
             color = " ".join(partes[2:])
-            color_tokens = limpiar_tokens(color)
 
-            # Match modelo exacto
-            if f"DS {modelo}" in texto_normalizado or f"DS{modelo}" in texto_normalizado:
-                if len(palabras_ocr & color_tokens) >= 1:  # permite coincidencias suaves
-                    item = next(
-                        (i for i in inventario if
-                         i.get("marca", "").upper() == "DS" and
-                         i.get("modelo", "").upper() == modelo and
-                         i.get("color", "").upper() == color),
-                        None
-                    )
-                    precio = item["precio"] if item else "no disponible"
-
+            # Requiere que el modelo esté presente exacto
+            if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
+                # Color con coincidencia suave
+                color_encontrado = any(pal in texto for pal in color.split())
+                if color_encontrado:
                     return {
                         "modelo": modelo,
                         "color": color,
                         "marca": "DS",
                         "type": "text",
-                        "text": (
-                            f"✅ Perfecto, tomaremos *DS {modelo}* de color *{color}*.\n"
-                            f"💲 Precio: *{precio}* COP con envío gratis 🚚.\n"
-                            "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                            "¿Seguimos con la compra?"
-                        )
+                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
                     }
 
     return None
@@ -2907,17 +2884,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # ✅ Cargar carpetas desde Drive (para validación directa)
         carpetas_en_drive = listar_carpetas_drive()
 
-        # 🔄 Asegúrate de tener el inventario cargado
-        inv = obtener_inventario()                     # ← añade esto si aún no lo tenías
-        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)  # ← ahora 3 args
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
             modelo_solo = normalize(resultado["modelo"])
             color_detectado = normalize(resultado["color"])
 
             item = next(
-                (i for i in inv
-                 if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
+                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
                 None
             )
 
@@ -2940,12 +2914,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     text=(
                         f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
                         f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                        "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        "¿Seguimos con la compra?"
+                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                        f"¿Seguimos con la compra?"
                     ),
                     parse_mode="Markdown"
                 )
                 return
+
 
 
 
@@ -5586,8 +5561,7 @@ async def venom_webhook(req: Request):
 
                     # ✅ Cargar carpetas desde Drive antes de intentar OCR
                     carpetas_en_drive = listar_carpetas_drive()
-                    inv = obtener_inventario()  # ← ✅ se agregó este fix
-                    respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)
+                    respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
                     if respuesta_ocr:
                         est.update({
@@ -5604,7 +5578,6 @@ async def venom_webhook(req: Request):
 
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
-
 
                 # 🧠 CLIP - identificación de modelo
                 try:
