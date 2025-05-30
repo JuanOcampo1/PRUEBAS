@@ -67,6 +67,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 estado_usuario = {}
 usuarios_saludo_enviado = set()
+_carpetas_cache = None  # ← esto evita que falle listar_carpetas_drive()
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -83,57 +84,14 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
-
-def registrar_o_actualizar_lead(data: dict) -> bool:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-
+def obtener_inventario():
     try:
-        logging.info("[LEADS] ⇢ Intentando registrar o actualizar lead...")
-        logging.info(f"[LEADS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
-
-        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-
-        sheet = client.open("PEDIDOS").worksheet("LEADS")
-        telefono = data.get("Teléfono", "").strip()
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if not telefono:
-            logging.warning("[LEADS] ⚠️ Teléfono vacío. No se puede registrar.")
-            return False
-
-        registros = sheet.col_values(1)  # Columna A: Teléfono
-        logging.info(f"[LEADS] 🔍 Total de registros existentes: {len(registros)}")
-
-        fila_data = [
-            telefono,
-            data.get("Fecha Registro", fecha),
-            data.get("Nombre", ""),
-            data.get("Producto", ""),
-            data.get("Color", ""),
-            data.get("Talla", ""),
-            data.get("Correo", ""),
-            data.get("Fase", ""),
-            data.get("Último Mensaje", ""),
-            data.get("Estado", "")
-        ]
-
-        if telefono in registros:
-            fila_index = registros.index(telefono) + 1
-            sheet.update(f"A{fila_index}:J{fila_index}", [fila_data])
-            logging.info(f"[LEADS] 🔁 Lead actualizado (fila {fila_index})")
-        else:
-            sheet.append_row(fila_data)
-            logging.info("[LEADS] ✅ Lead registrado por primera vez")
-
-        return True
-
+        with open("inventario.json", "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception as e:
-        logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
-        return False
+        logging.error(f"❌ Error cargando inventario: {e}")
+        return []
+
 
 RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
 
@@ -1139,12 +1097,11 @@ def clasificar_saludo(texto: str) -> str:
     ]):
         return "comprar"
 
-    # 💰 Detectar si habla de precio (con o sin signo de pregunta)
-    if any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
+    # 💰 Detectar si pregunta por precio (solo si es una pregunta)
+    if "?" in texto and any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
         return "precio"
 
     return "general"
-
 
 async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
@@ -1183,7 +1140,11 @@ async def enviar_welcome_venom(cid: str, tipo: str = "general"):
                 },
                 {
                     "type": "text",
-                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en qué te ayudo"
+                    "text": (
+                        "🙋‍♂️ Hola, dime tu *nombre* y desde qué *ciudad* nos escribes 🏙️✍️ "
+                        "para darte una asesoría más personalizada 💬😊"
+                    ),
+                    "parse_mode": "Markdown"
                 }
             ]
         }
@@ -1194,7 +1155,6 @@ async def enviar_welcome_venom(cid: str, tipo: str = "general"):
             "type": "text",
             "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
         }
-
 
 
 
@@ -1232,16 +1192,14 @@ _ultima_actualizacion = None
 def listar_carpetas_drive():
     """
     Lista los nombres de carpetas en Google Drive dentro de una carpeta raíz.
-    Usa caché para evitar llamadas innecesarias durante 10 minutos.
+    Solo recarga desde Drive si no hay caché (por ejemplo, al reiniciar el servidor).
     """
-    global _carpetas_cache, _ultima_actualizacion
-    ahora = datetime.utcnow()
+    global _carpetas_cache
 
-    if _carpetas_cache is not None and _ultima_actualizacion is not None:
-        if (ahora - _ultima_actualizacion) < timedelta(minutes=10):
-            return _carpetas_cache  # Devuelve caché si aún es válida
+    if _carpetas_cache is not None:
+        return _carpetas_cache  # Devuelve la cache si ya fue cargada
 
-    # Si no hay cache o expiró, recargar desde Drive
+    # Si no hay cache (primer uso tras reinicio), consultar Drive
     from googleapiclient.discovery import build
     import os, json
     from google.oauth2 import service_account
@@ -1271,12 +1229,10 @@ def listar_carpetas_drive():
         if page_token is None:
             break
 
-    # Guardar resultado en caché
     _carpetas_cache = carpetas
-    _ultima_actualizacion = ahora
-
     return carpetas
 
+inv = obtener_inventario()
 
 
 def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
@@ -1287,33 +1243,23 @@ def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) ->
     import re
     import unicodedata
 
-    def normalizar(texto):
-        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-        texto = texto.replace("-", " ").replace("_", " ")
-        texto = re.sub(r"[^A-Z0-9 ]", " ", texto)
-        return texto
-
-    def limpiar_tokens(texto):
-        palabras = texto.split()
-        excluidas = {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"}
-        return set(p for p in palabras if p not in excluidas)
-
-    texto = normalizar(texto)
-    palabras_ocr = limpiar_tokens(texto)
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    texto = texto.replace("-", " ").replace("_", " ")
+    texto_limpio = re.sub(r"[^A-Z0-9 ]", " ", texto)
+    palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
     for carpeta in carpetas_drive:
-        nombre = normalizar(carpeta)
+        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
             color = " ".join(partes[2:])
-            color_tokens = limpiar_tokens(color)
+            color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
-            # Detectar modelo exacto (DS 304 o DS304)
             if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                interseccion = palabras_ocr & color_tokens
-                if len(interseccion) >= 1:  # puede bajar a 1 si quieres permitir match débil
+                if len(palabras_ocr & color_tokens) >= 2:
+                    # Buscar precio
                     item = next(
                         (i for i in inventario if
                          i.get("marca", "").upper() == "DS" and
@@ -1321,6 +1267,7 @@ def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) ->
                          i.get("color", "").upper() == color),
                         None
                     )
+
                     precio = item["precio"] if item else "no disponible"
 
                     return {
@@ -2883,6 +2830,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    inv = obtener_inventario()
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
     if update.message.photo:
@@ -2933,6 +2881,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
                 return
+
 
 
 
@@ -4431,7 +4380,18 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
-   
+
+def normalizar_texto(texto):
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
+    texto = texto.upper()
+    texto = re.sub(r"[^\w\s]", "", texto)
+    return texto.strip()
+
+# Asegúrate de definir texto antes de usarlo
+texto = "mensaje de prueba o body.lower()"  # 👈 aquí pon el valor real del texto que estás normalizando
+texto_normalizado = normalizar_texto(texto)
+
+
 # --------------------------------------------------------------------
 
 nest_asyncio.apply()
@@ -4533,10 +4493,20 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     try:
         texto_limpio = texto.strip().lower()
 
+        # 1️⃣ Primer intento con estructura "soy Juan de Bucaramanga"
         match_dual = re.search(
             r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
             texto_limpio
         )
+
+
+        # 2️⃣ Segundo intento simple: "Juan de Medellín"
+        if not match_dual:
+            match_dual = re.search(
+                r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                texto_limpio
+            )
+
         if match_dual:
             nombre_detectado = match_dual.group(1).strip().title()
             ciudad_detectada = match_dual.group(2).strip().title()
@@ -4549,8 +4519,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
             else:
                 logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
+
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -4810,8 +4782,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
     # FAQ: ¿Por qué tan caros?
-    if any(p in texto for p in (
-        "por qué tan caros", "porque tan caro", "porque tan costoso", "es muy caro", "muy costoso"
+    if any(p in texto_normalizado for p in (
+        "POR QUE TAN CAROS", "PORQUE TAN CARO", "PORQUE TAN COSTOSO", "ES MUY CARO", "MUY COSTOSO"
     )):
         try:
             ruta_audio = "/var/data/audios/caros/CAROS.mp3"
@@ -4835,14 +4807,15 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
     # FAQ: ¿Son cosidos?
-    if any(p in texto for p in (
-        "son cosidos", "vienen cosidos", "estan cosidos", "cosido", "cosidos"
+    if any(p in texto_normalizado for p in (
+        "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
+            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4851,7 +4824,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "COSIDAS.mp3",
+                "filename": "COSIDOS.mp3",
                 "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
             }
 
@@ -4861,14 +4834,33 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+    # FAQ: Redes sociales
+    if any(p in texto_normalizado for p in (
+        "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB", "PÁGINA WEB",
+        "TIENEN INSTAGRAM", "TIENEN FACEBOOK", "TIENEN TIKTOK", "COMO LOS ENCUENTRO EN REDES",
+        "SUS REDES", "SIGUEN EN REDES", "WEB"
+    )):
+        return {
+            "type": "text",
+            "text": (
+                "📲 ¡Claro! Aquí están todas nuestras redes y página oficial:\n\n"
+                "👟 *Instagram:* [@x100_col](https://www.instagram.com/x100_col)\n"
+                "📘 *Facebook:* [@x100col](https://www.facebook.com/x100col)\n"
+                "🎵 *TikTok:* [@x100_col](https://www.tiktok.com/@x100_col?_t=ZS-8wiexPh9ah6&_r=1)\n"
+                "🌐 *Página web:* [x100-col.com](https://www.x100-col.com/tienda/)\n\n"
+                "Síguenos para conocer nuevos modelos, promociones exclusivas y más 🔥💯"
+            ),
+            "parse_mode": "Markdown"
+        }
+
     # FAQ: ¿La suela es de caucho?
-    if any(p in texto for p in (
-        "suela de caucho", "es de caucho", "la suela es de", "la suela de que es", "material de la suela"
+    if any(p in texto_normalizado for p in (
+        "SUELA DE CAUCHO", "ES DE CAUCHO", "LA SUELA ES DE", "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
     )):
         try:
-            ruta_audio = "/var/data/audios/caucho/caucho.mp3"
+            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4877,7 +4869,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "caucho.mp3",
+                "filename": "CAUCHO.mp3",
                 "text": "👟 Te explicamos de qué material es la suela:"
             }
 
@@ -4887,6 +4879,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
 
     texto = texto.lower()
 
@@ -5127,14 +5120,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = est
         logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
-     # ──────────────────────────────
+    # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
+    ADMIN_CID = "573137842559"  # Tu número de prueba
+    is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
-    # 1️⃣ COMANDO /start — resetea para cualquier usuario
-    if texto.strip() == "/start":
-        logging.info(f"🔁 El usuario {cid} reinició el flujo con /start")
-
+    # 1️⃣ COMANDO /start solo para admin (resetea todo)
+    if texto.strip() == "/start" and cid == ADMIN_CID:
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
@@ -5147,6 +5140,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "type": "text",
             "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
         }
+
 
     # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
     if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
@@ -5185,6 +5179,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude analizar la imagen. ¿Puedes enviarla de nuevo enfocando solo el zapato?"
             }
+    is_media_inicial = mtype in ("image", "video", "ptt", "audio", "document")
 
     # 3️⃣ Enviar welcome si no se ha enviado aún y no es media
     if est.get("fase") == "inicio" and not est.get("welcome_enviado") and not is_media_inicial:
