@@ -69,6 +69,14 @@ logging.basicConfig(level=logging.DEBUG)
 estado_usuario = {}
 usuarios_saludo_enviado = set()
 
+# 🔧 Normalizador global de texto (acentos, signos, mayúsculas)
+def normalizar(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
+    texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
+    return texto.upper().strip()
+
+# ... sigue con procesar_wa(), venom_webhook, etc.
+
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
     """
@@ -1146,7 +1154,6 @@ def clasificar_saludo(texto: str) -> str:
 
     return "general"
 
-
 async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
         if tipo == "precio":
@@ -1184,7 +1191,11 @@ async def enviar_welcome_venom(cid: str, tipo: str = "general"):
                 },
                 {
                     "type": "text",
-                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en qué te ayudo"
+                    "text": (
+                        "🙋‍♂️ Hola, dime tu *nombre* y desde qué *ciudad* nos escribes 🏙️✍️ "
+                        "para darte una asesoría más personalizada 💬😊"
+                    ),
+                    "parse_mode": "Markdown"
                 }
             ]
         }
@@ -1195,6 +1206,7 @@ async def enviar_welcome_venom(cid: str, tipo: str = "general"):
             "type": "text",
             "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
         }
+
 
 
 
@@ -4809,9 +4821,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+    # 🔧 Normalizar texto antes de los FAQ
+    texto_normalizado = normalizar(texto)
+
     # FAQ: Redes sociales
     if any(p in texto_normalizado for p in (
-        "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB", "PÁGINA WEB",
+        "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB",
         "TIENEN INSTAGRAM", "TIENEN FACEBOOK", "TIENEN TIKTOK", "COMO LOS ENCUENTRO EN REDES",
         "SUS REDES", "SIGUEN EN REDES", "WEB"
     )):
@@ -4829,8 +4844,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         }
 
     # FAQ: ¿Por qué tan caros?
-    if any(p in texto for p in (
-        "por qué tan caros", "porque tan caro", "porque tan costoso", "es muy caro", "muy costoso"
+    if any(p in texto_normalizado for p in (
+        "POR QUE TAN CAROS", "PORQUE TAN CARO", "PORQUE TAN COSTOSO",
+        "ES MUY CARO", "MUY COSTOSO"
     )):
         try:
             ruta_audio = "/var/data/audios/caros/CAROS.mp3"
@@ -4854,9 +4870,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
     # FAQ: ¿Son cosidos?
-    if any(p in texto for p in (
-        "son cosidos", "vienen cosidos", "estan cosidos", "cosido", "cosidos"
+    if any(p in texto_normalizado for p in (
+        "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
     )):
         try:
             ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
@@ -4880,9 +4897,11 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
     # FAQ: ¿La suela es de caucho?
-    if any(p in texto for p in (
-        "suela de caucho", "es de caucho", "la suela es de", "la suela de que es", "material de la suela"
+    if any(p in texto_normalizado for p in (
+        "SUELA DE CAUCHO", "ES DE CAUCHO", "LA SUELA ES DE",
+        "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
     )):
         try:
             ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
