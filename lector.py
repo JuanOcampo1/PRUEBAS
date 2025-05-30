@@ -1282,16 +1282,13 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
     Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
     Ejemplo carpeta: DS_305_VERDE LIMON
-    Coincidencia robusta: al menos 2 palabras del color deben coincidir (ignorando ruido).
     """
     import re
     import unicodedata
 
-    # Normaliza y limpia texto OCR
+    # Normaliza texto
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
     texto = texto.replace("-", " ").replace("_", " ")
-    texto_limpio = re.sub(r"[^A-Z ]", " ", texto)  # quita símbolos raros como "X"
-    palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
     for carpeta in carpetas_drive:
         nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
@@ -1300,13 +1297,12 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
             color = " ".join(partes[2:])
-            color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
 
-            # Validar modelo exacto
+            # Requiere que el modelo esté presente exacto
             if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                # Coincidencia más exigente de color (mínimo 2 palabras del color)
-                coinciden = palabras_ocr & color_tokens
-                if len(coinciden) >= 2:
+                # Color con coincidencia suave
+                color_encontrado = any(pal in texto for pal in color.split())
+                if color_encontrado:
                     return {
                         "modelo": modelo,
                         "color": color,
@@ -4511,16 +4507,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     try:
         texto_limpio = texto.strip().lower()
 
-        # 1️⃣ Primer intento con estructura "soy Juan de Bucaramanga"
         match_dual = re.search(
             r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
             texto_limpio
         )
-
-        # 2️⃣ Segundo intento simple: "Juan de Medellín"
-        if not match_dual:
-            match_dual = re.search(r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})", texto_limpio)
-
         if match_dual:
             nombre_detectado = match_dual.group(1).strip().title()
             ciudad_detectada = match_dual.group(2).strip().title()
@@ -4535,7 +4525,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
-
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -4825,9 +4814,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "son cosidos", "vienen cosidos", "estan cosidos", "cosido", "cosidos"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
+            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4836,7 +4825,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "COSIDS.mp3",
+                "filename": "COSIDOS.mp3",
                 "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
             }
 
@@ -4851,9 +4840,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "suela de caucho", "es de caucho", "la suela es de", "la suela de que es", "material de la suela"
     )):
         try:
-            ruta_audio = "/var/data/audios/caucho/caucho.mp3"
+            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4862,7 +4851,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "caucho.mp3",
+                "filename": "CAUCHO.mp3",
                 "text": "👟 Te explicamos de qué material es la suela:"
             }
 
@@ -5115,8 +5104,11 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    # 1️⃣ COMANDO /start válido para todos los usuarios
-    if texto.strip() == "/start":
+    ADMIN_CID = "573137842559"  # Tu número de prueba
+    is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
+
+    # 1️⃣ COMANDO /start solo para admin (resetea todo)
+    if texto.strip() == "/start" and cid == ADMIN_CID:
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
@@ -5129,7 +5121,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "type": "text",
             "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
         }
-
 
     # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
     if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
