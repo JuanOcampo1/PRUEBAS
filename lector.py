@@ -1139,11 +1139,12 @@ def clasificar_saludo(texto: str) -> str:
     ]):
         return "comprar"
 
-    # 💰 Detectar si pregunta por precio (solo si es una pregunta)
-    if "?" in texto and any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
+    # 💰 Detectar si habla de precio (con o sin signo de pregunta)
+    if any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
         return "precio"
 
     return "general"
+
 
 async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
@@ -1278,40 +1279,65 @@ def listar_carpetas_drive():
 
 
 
-def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
+def detectar_modelo_color(texto: str, carpetas_drive: list, inventario: list) -> dict:
     """
-    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
-    Ejemplo carpeta: DS_305_VERDE LIMON
+    Detecta modelo y color desde texto OCR comparando con carpetas de Drive.
+    Si encuentra match, responde con mensaje estructurado con precio y sigue el flujo.
     """
     import re
     import unicodedata
 
-    # Normaliza texto
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-    texto = texto.replace("-", " ").replace("_", " ")
+    def normalizar(texto):
+        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+        texto = texto.replace("-", " ").replace("_", " ")
+        texto = re.sub(r"[^A-Z0-9 ]", " ", texto)
+        return texto
+
+    def limpiar_tokens(texto):
+        palabras = texto.split()
+        excluidas = {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"}
+        return set(p for p in palabras if p not in excluidas)
+
+    texto = normalizar(texto)
+    palabras_ocr = limpiar_tokens(texto)
 
     for carpeta in carpetas_drive:
-        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        nombre = normalizar(carpeta)
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
             color = " ".join(partes[2:])
+            color_tokens = limpiar_tokens(color)
 
-            # Requiere que el modelo esté presente exacto
+            # Detectar modelo exacto (DS 304 o DS304)
             if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                # Color con coincidencia suave
-                color_encontrado = any(pal in texto for pal in color.split())
-                if color_encontrado:
+                interseccion = palabras_ocr & color_tokens
+                if len(interseccion) >= 1:  # puede bajar a 1 si quieres permitir match débil
+                    item = next(
+                        (i for i in inventario if
+                         i.get("marca", "").upper() == "DS" and
+                         i.get("modelo", "").upper() == modelo and
+                         i.get("color", "").upper() == color),
+                        None
+                    )
+                    precio = item["precio"] if item else "no disponible"
+
                     return {
                         "modelo": modelo,
                         "color": color,
                         "marca": "DS",
                         "type": "text",
-                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                        "text": (
+                            f"🟢 ¡Qué buena elección! Los *DS{modelo}* de color *{color}* están brutales 😎.\n"
+                            f"💲 Su precio es: *{precio}* COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                            "🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            "¿Seguimos con la compra?"
+                        )
                     }
 
     return None
+
 
 
 
@@ -4814,9 +4840,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "son cosidos", "vienen cosidos", "estan cosidos", "cosido", "cosidos"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
+            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4825,7 +4851,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "COSIDOS.mp3",
+                "filename": "COSIDAS.mp3",
                 "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
             }
 
@@ -4840,9 +4866,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "suela de caucho", "es de caucho", "la suela es de", "la suela de que es", "material de la suela"
     )):
         try:
-            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
+            ruta_audio = "/var/data/audios/caucho/caucho.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4851,7 +4877,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "CAUCHO.mp3",
+                "filename": "caucho.mp3",
                 "text": "👟 Te explicamos de qué material es la suela:"
             }
 
@@ -5101,14 +5127,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = est
         logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
-    # ──────────────────────────────
+     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    ADMIN_CID = "573137842559"  # Tu número de prueba
-    is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
-    # 1️⃣ COMANDO /start solo para admin (resetea todo)
-    if texto.strip() == "/start" and cid == ADMIN_CID:
+    # 1️⃣ COMANDO /start — resetea para cualquier usuario
+    if texto.strip() == "/start":
+        logging.info(f"🔁 El usuario {cid} reinició el flujo con /start")
+
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
