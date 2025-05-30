@@ -4876,9 +4876,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
+            ruta_audio = "/var/data/audios/cosidos/cosidos.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4887,12 +4887,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "COSIDOS.mp3",
+                "filename": "COSIDAS.mp3",
                 "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
             }
 
         except Exception as e:
-            logging.error(f"❌ Error enviando audio COSIDOS: {e}")
+            logging.error(f"❌ Error enviando audio COSIDAS: {e}")
             return {
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
@@ -4904,9 +4904,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
     )):
         try:
-            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
+            ruta_audio = "/var/data/audios/caucho/caucho.mp3"
             if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
+                raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
 
             with open(ruta_audio, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -4915,7 +4915,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "audio",
                 "base64": b64,
                 "mimetype": "audio/mpeg",
-                "filename": "CAUCHO.mp3",
+                "filename": "caucho.mp3",
                 "text": "👟 Te explicamos de qué material es la suela:"
             }
 
@@ -5586,7 +5586,8 @@ async def venom_webhook(req: Request):
 
                     # ✅ Cargar carpetas desde Drive antes de intentar OCR
                     carpetas_en_drive = listar_carpetas_drive()
-                    respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+                    inv = obtener_inventario()  # ← ✅ se agregó este fix
+                    respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive, inv)
 
                     if respuesta_ocr:
                         est.update({
@@ -5603,6 +5604,7 @@ async def venom_webhook(req: Request):
 
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
+
 
                 # 🧠 CLIP - identificación de modelo
                 try:
