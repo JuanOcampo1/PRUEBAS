@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 import gspread
 from google.oauth2 import service_account     # ← alias de antes
+import openai
 
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
@@ -75,7 +76,32 @@ def normalizar(texto: str) -> str:
     texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.upper().strip()
 
-# ... sigue con procesar_wa(), venom_webhook, etc.
+def detectar_nombre_ia_4mini(texto: str) -> str:
+    """
+    Usa GPT-4.0 mini (económico) para detectar el nombre de la persona desde un mensaje.
+    """
+    prompt = f"""
+Solo responde con el nombre de la persona mencionado en este mensaje. No incluyas apellidos, ciudades ni palabras extras.
+
+Mensaje: {texto}
+Nombre:
+"""
+
+    try:
+        respuesta = openai.ChatCompletion.create(
+            model="gpt-4-0613",  # Este se enruta como GPT-4 mini si tienes el plan configurado así
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10
+        )
+        nombre = respuesta["choices"][0]["message"]["content"].strip()
+        return nombre
+
+    except Exception as e:
+        print(f"❌ Error en detectar_nombre_ia_4mini: {e}")
+        return None
+
+
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -3686,32 +3712,52 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 💳 MÉTODO DE PAGO – ELECCIÓN
     # ────────────────────────────────────────────────
     if est.get("fase") == "esperando_pago":
-        opciones = {
-            "transferencia": [
-                "transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr",
-                "nequi", "davivienda", "daviplata", "bancolombia", "pse"
-            ],
-            "contraentrega": [
-                "contraentrega", "contra entrega", "contra", "contrapago"
-            ],
-            "addi": [
-                "addi", "pagar con addi", "credito", "crédito", "financiacion", "financiación"
-            ],
-            "tarjeta": [
-                "tarjeta", "tarjeta de credito", "tarjeta de crédito", "pago con tarjeta", "visa", "mastercard"
-            ]
-        }
-        txt_normalizado = normalize(txt_raw)
+
+        # Palabras clave por método (prioridad alta → baja)
+        txt_norm = normalize(txt_raw)
         metodo_detectado = None
-        for metodo, alias in opciones.items():
-            if difflib.get_close_matches(txt_normalizado, alias, n=1, cutoff=0.6):
-                metodo_detectado = metodo
-                break
+
+        # 🚫  Cliente se retracta o está confundido → volver a menú
+        if any(word in txt_norm for word in
+               ["NO QUIERO", "CAMBIAR", "OTRO METODO", "OTRO MÉTODO",
+                "OTRA OPCION", "OTRA OPCIÓN"]):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "😊 Tenemos *4 formas de pago* 💰\n\n"
+                    "1. 💵 *Pago anticipado* (Nequi, Daviplata, Bancolombia):\n"
+                    "   Pagas el valor completo antes del envío y tu compra queda asegurada 🚀.\n\n"
+                    "2. ✈️ *Pago contra entrega* (abono $30 000).\n\n"
+                    "3. 💳 *Tarjeta de crédito*.\n\n"
+                    "4. 💙 *Addi* (crédito a cuotas).\n\n"
+                    "🤩 ¿Cuál prefieres? Escribe *Pago anticipado*, *Contraentrega*, *Tarjeta* o *Addi*."
+                ),
+                parse_mode="Markdown"
+            )
+            return  # sigue en 'esperando_pago'
+
+        # 🔍  Detección directa sin difflib
+        if any(w in txt_norm for w in
+               ["NEQUI", "DAVIPLATA", "BANCOLOMBIA", "TRANSFERENCIA",
+                "ANTICIPADO", "QR", "PSE"]):
+            metodo_detectado = "transferencia"
+        elif any(w in txt_norm for w in
+                 ["CONTRAENTREGA", "CONTRA ENTREGA", "CONTRAPAGO"]):
+            metodo_detectado = "contraentrega"
+        elif any(w in txt_norm for w in
+                 ["TARJETA", "CREDITO", "CRÉDITO", "VISA", "MASTERCARD"]):
+            metodo_detectado = "tarjeta"
+        elif any(w in txt_norm for w in
+                 ["ADDI", "FINANCIACION", "FINANCIACIÓN", "CUOTAS"]):
+            metodo_detectado = "addi"
 
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 Dime porfa cómo deseas pagar: *pago anticipado*, *transferencia*, *nequi*, *daviplata*, *bancolombia*, *tarjeta*, *contraentrega* o *Addi* 😊",
+                text=(
+                    "💳 No logré identificar tu método de pago.\n"
+                    "Escribe: *Pago anticipado*, *Contraentrega*, *Tarjeta* o *Addi* 😊"
+                ),
                 parse_mode="Markdown"
             )
             return
@@ -4519,26 +4565,64 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     est = estado_usuario[cid]
     # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
     try:
-        texto_limpio = texto.strip().lower()
+        if not memoria.get("ciudad"):
+            texto_limpio = texto.strip().lower()
 
-        match_dual = re.search(
-            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
-            texto_limpio
-        )
-        if match_dual:
-            nombre_detectado = match_dual.group(1).strip().title()
-            ciudad_detectada = match_dual.group(2).strip().title()
+            match_dual = re.search(
+                r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                texto_limpio
+            )
 
-            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
-                est["nombre"] = nombre_detectado
-                est["ciudad"] = ciudad_detectada
-                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
-                logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
-            else:
-                logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+            if match_dual:
+                nombre_detectado = match_dual.group(1).strip().title()
+                ciudad_detectada = match_dual.group(2).strip().title()
+
+                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                    memoria["nombre"] = nombre_detectado
+                    memoria["ciudad"] = ciudad_detectada
+                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                    guardar_memoria_usuario(cid, "nombre", nombre_detectado)
+                    logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
+
+                    return {
+                        "type": "text",
+                        "text": f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                    }
+                else:
+                    logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
+
+    # 👤 Si aún no hay nombre, intentar detectar solo el nombre con IA
+    try:
+        if not memoria.get("nombre"):
+            texto_limpio = texto.strip().lower()
+            nombre_detectado = None
+
+            match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
+            if match_nombre:
+                nombre_detectado = match_nombre.group(1).strip().title()
+                logging.info(f"📛 Nombre detectado con regex: {nombre_detectado}")
+
+            if not nombre_detectado:
+                nombre_detectado = detectar_nombre_ia_4mini(texto)
+                logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
+
+            if nombre_detectado:
+                memoria["nombre"] = nombre_detectado
+                guardar_memoria_usuario(cid, "nombre", nombre_detectado)
+                logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
+
+                ciudad = memoria.get("ciudad", "tu ciudad")
+                return {
+                    "type": "text",
+                    "text": f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                }
+
+    except Exception as e:
+        logging.error(f"❌ Error detectando nombre: {e}")
+
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -4851,7 +4935,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/cosidos.mp3"
+            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
             if not os.path.exists(ruta_audio):
                 raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
 
@@ -5143,7 +5227,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    ADMIN_CID = "573137842559"  # Tu número de prueba
+    ADMIN_CID = "573246666630"  # Tu número de prueba
     is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
     # 1️⃣ COMANDO /start solo para admin (resetea todo)
