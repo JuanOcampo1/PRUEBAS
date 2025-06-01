@@ -1090,9 +1090,6 @@ def convertir_palabras_a_numero(texto):
 
     return numero if numero else None
 
-import difflib
-import re
-import unicodedata
 
 def normalize(texto: str) -> str:
     texto = texto.lower().strip()
@@ -1316,41 +1313,53 @@ def listar_carpetas_drive():
 
     return carpetas
 
-
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
-    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
-    Ejemplo carpeta: DS_305_VERDE LIMON
+    Detecta modelo y color comparando con nombres de carpetas Drive.
+    Carpetas: DS_305_VERDE LIMON  → modelo: 305, color: VERDE LIMON
+    Coincidencia estricta: todos los tokens de color deben aparecer.
     """
     import re
     import unicodedata
 
-    # Normaliza texto
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-    texto = texto.replace("-", " ").replace("_", " ")
+    def norm(cad: str) -> str:
+        # quita tildes, mayúsculas, reemplaza separadores por espacio único
+        cad = unicodedata.normalize("NFKD", cad).encode("ascii", "ignore").decode("utf-8").upper()
+        cad = re.sub(r"[-_/&]", " ", cad)          # guión, guion bajo, slash, ampersand
+        cad = re.sub(r"\s+[X]\s+", " ", cad)       # reemplaza " X " por espacio
+        cad = re.sub(r"\s+", " ", cad).strip()
+        return cad
+
+    texto_norm = norm(texto)
 
     for carpeta in carpetas_drive:
-        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        nombre = norm(carpeta)           # Ej: DS 305 VERDE LIMON
         partes = nombre.split()
 
+        # Asegúrate de formato DS <modelo> <color...>
         if len(partes) >= 3 and partes[0] == "DS":
-            modelo = partes[1]
-            color = " ".join(partes[2:])
+            modelo = partes[1]                           # 305
+            color_tokens = partes[2:]                    # ["VERDE", "LIMON"]
 
-            # Requiere que el modelo esté presente exacto
-            if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                # Color con coincidencia suave
-                color_encontrado = any(pal in texto for pal in color.split())
-                if color_encontrado:
+            # 1️⃣ Modelo debe aparecer exacto (DS 305 o DS305)
+            if f"DS {modelo}" in texto_norm or f"DS{modelo}" in texto_norm:
+                # 2️⃣ Cada token de color debe existir como palabra completa
+                if all(re.search(rf"\b{re.escape(tok)}\b", texto_norm) for tok in color_tokens):
+                    color = " ".join(color_tokens)
                     return {
                         "modelo": modelo,
-                        "color": color,
+                        "color": color.title(),
                         "marca": "DS",
                         "type": "text",
-                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                        "text": (
+                            f"✅ Perfecto, tomaremos *DS {modelo}* color *{color.title()}*.\n"
+                            "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* "
+                            "de tus tenis actuales 👟."
+                        )
                     }
 
     return None
+
 
 
 
@@ -2233,14 +2242,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if any(p in txt for p in ("hola", "buenas", "buenos días", "buenas tardes", "buenas noches")):
         logging.info(f"👋 Saludo detectado: {txt_raw} — CID: {cid}")
 
-        # 1. Mensaje de bienvenida
-        await update.message.reply_text(
-            WELCOME_TEXT,
-            reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                "Rastrear pedido", "Realizar cambio"
-            ])
-        )
 
         # 2. Envío automático de todos los videos disponibles (excepto confianza)
         ruta_videos = "/var/data/videos"
@@ -3236,43 +3237,77 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
         return
 
-    # 👟 Elegir talla escrita (y pedir lengüeta)
+    # 👟 Elegir talla escrita (con opción alternativa si no puede mandar lengüeta)
     if est.get("fase") == "esperando_talla":
         tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
         if isinstance(tallas_disponibles, (int, float, str)):
             tallas_disponibles = [str(tallas_disponibles)]
 
-        # Normalización y coincidencia difusa
-        tallas_normalizadas = {normalize(t): t for t in tallas_disponibles}
-        entrada_normalizada = normalize(txt)
+        txt_norm = normalize(txt)
+        entrada_num = re.findall(r"\d+\.?\d*", txt_norm)
 
-        coincidencias = difflib.get_close_matches(entrada_normalizada, tallas_normalizadas.keys(), n=1, cutoff=0.6)
+        # 👉 Detección directa si el cliente escribe talla
+        if entrada_num:
+            talla_escrita = entrada_num[0]
 
-        if coincidencias:
-            talla_detectada = tallas_normalizadas[coincidencias[0]]
-            est["talla"] = talla_detectada
+            # 🚀 1. Intentar conversión automática desde cm/mm/JP
+            talla_convertida = extraer_cm_y_convertir_talla(txt)
+            if talla_convertida:
+                est["talla"] = str(talla_convertida)
+                estado_usuario[cid] = est
+                return {
+                    "type": "text",
+                    "text": (
+                        f"📏 Detecté que tu talla es *{talla_convertida}* en nuestra horma, "
+                        "basada en los centímetros que escribiste. ¿Seguimos con esa talla?"
+                    ),
+                    "parse_mode": "Markdown"
+                }
+
+            # 🚧 2. Si no se pudo convertir, pedir aclaración
+            if "cm" in txt_norm:
+                confirmacion = f"¿Te refieres a *{talla_escrita} cm*?"
+            elif "usa" in txt_norm or float(talla_escrita) <= 14:
+                confirmacion = f"¿Te refieres a *talla USA {talla_escrita}*?"
+            elif int(float(talla_escrita)) >= 35 and int(float(talla_escrita)) <= 48:
+                confirmacion = f"¿Te refieres a *talla colombiana {talla_escrita}*?"
+            else:
+                confirmacion = f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
+
+            est["talla_pendiente_confirmar"] = talla_escrita
+            estado_usuario[cid] = est
+
+            return {
+                "type": "text",
+                "text": f"🧐 {confirmacion}"
+            }
+
+        # ✅ Si ya se confirmó una talla previamente
+        if "talla_pendiente_confirmar" in est and any(p in txt_norm for p in ["si", "sí", "exacto", "eso"]):
+            est["talla"] = est.pop("talla_pendiente_confirmar")
             estado_usuario[cid] = est
 
             ruta = "/var/data/extra/lengueta_ejemplo.jpg"
             if os.path.exists(ruta):
                 with open(ruta, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode("utf-8")
+
                 return {
                     "type": "multi",
                     "messages": [
                         {
                             "type": "text",
                             "text": (
-                                f"✅ ¡Claro que tenemos talla {talla_detectada}! "
-                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
-                                "del zapato que usas normalmente 👟."
+                                f"✅ Perfecto, tomamos la talla *{est['talla']}* para el pedido.\n\n"
+                                "📸 Si más tarde puedes, sería genial que envíes una foto de la lengüeta para mayor seguridad 👟.\n"
+                                "_Si la talla no coincide al llegar, el cambio tiene costo de envío._"
                             ),
                             "parse_mode": "Markdown"
                         },
                         {
                             "type": "photo",
                             "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                            "text": "Así debe verse la lengüeta por si puedes enviarla luego 📸"
                         }
                     ]
                 }
@@ -3280,18 +3315,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return {
                 "type": "text",
                 "text": (
-                    f"✅ ¡Claro que tenemos talla {talla_detectada}! "
-                    "📸 Por favor mándame una foto de la lengüeta de tu zapato para asegurarnos de la talla correcta 👟."
+                    f"✅ Perfecto, tomamos la talla *{est['talla']}* para el pedido.\n\n"
+                    "📸 Si más tarde puedes, sería genial que envíes una foto de la lengüeta para mayor seguridad 👟.\n"
+                    "_Si la talla no coincide al llegar, el cambio tiene costo de envío._"
                 ),
                 "parse_mode": "Markdown"
             }
 
-        # ❌ No entendió ninguna talla, mostrar disponibles
+        # 🗨️ Cliente dice que no puede enviar la lengüeta
+        if any(p in txt_norm for p in ["no tengo zapato", "no puedo", "no tengo", "no estoy en casa", "sin lengüeta", "no tengo zapato a la mano"]):
+            return {
+                "type": "text",
+                "text": (
+                    "😅 Entiendo, si no puedes mandar la lengüeta en este momento no hay problema.\n\n"
+                    "👉 Puedes decirme:\n"
+                    "• Tu *talla estimada* en centímetros (ej: 27 cm)\n"
+                    "• Tu *talla USA* (ej: 10.5)\n"
+                    "• Tu *talla colombiana* (ej: 42 o 43)\n\n"
+                    "Y seguimos con el pedido. Solo recuerda que si la talla no coincide, el costo de la devolucion corre por tu cuenta🚚"
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # ❌ No entendió ninguna talla ni rechazo, mostrar tallas
         tallas_str = "\n".join(f"- {t}" for t in tallas_disponibles)
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "Mandame tu lengüeta pa que confirmemos el pedido.\n\n"
+                "Estas son las tallas disponibles:\n"
+                f"{tallas_str}\n\n"
+                "Escríbeme la que más se te acerque o mándame una foto de la lengüeta si puedes 👟"
             ),
             parse_mode="Markdown"
         )
@@ -4563,7 +4616,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         }
 
     est = estado_usuario[cid]
-    # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
+    memoria = cargar_memoria_usuario(cid)  # ← Esto resuelve el error
+    logging.info(f"📦 Ciudad recuperada de memoria: {memoria.get('ciudad')}")
+
+   # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
     try:
         if not memoria.get("ciudad"):
             texto_limpio = texto.strip().lower()
