@@ -2239,73 +2239,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     print("🧠 TEXTO:", txt_raw, "|", repr(txt_raw))
     print("🧠 ESTADO:", est)
 
-    # 👋 Detectar saludo inicial y responder con bienvenida + videos
-    if any(p in txt for p in ("hola", "buenas", "buenos días", "buenas tardes", "buenas noches")):
-        logging.info(f"👋 Saludo detectado: {txt_raw} — CID: {cid}")
-
-
-        # 2. Envío automático de todos los videos disponibles (excepto confianza)
-        ruta_videos = "/var/data/videos"
-        try:
-            if not os.path.exists(ruta_videos):
-                logging.warning(f"⚠️ Carpeta de videos no encontrada: {ruta_videos}")
-                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
-                return
-
-            archivos = sorted([
-                f for f in os.listdir(ruta_videos)
-                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
-            ])
-
-            logging.info(f"🎬 Videos encontrados (sin confianza): {archivos}")
-            print("📂 DEBUG: Archivos encontrados para enviar:", archivos)
-
-            if not archivos:
-                logging.warning("⚠️ Lista de videos vacía aunque la carpeta existe.")
-                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
-                return
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta y en que talla lo deseas!"
-            )
-            logging.info("🎯 Procediendo a enviar videos...")
-
-            for nombre in archivos:
-                try:
-                    path = os.path.join(ruta_videos, nombre)
-                    size = os.path.getsize(path)
-                    logging.info(f"🎥 Enviando: {nombre} — {size / 1024:.2f} KB")
-                    print(f"📤 DEBUG: Enviando {nombre} a {cid}")
-
-                    with open(path, "rb") as video_file:
-                        await ctx.bot.send_video(
-                            chat_id=cid,
-                            video=video_file,
-                            caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
-                            parse_mode="Markdown"
-                        )
-
-                except Exception as e:
-                    logging.error(f"❌ Error enviando video '{nombre}': {e}")
-                    await ctx.bot.send_message(cid, f"⚠️ No pude enviar el video {nombre}")
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🧐 ¿Dime que referencia te interesan, si no esta aca enviame la foto?"
-            )
-
-            # Solo cambiar la fase sin borrar el estado anterior
-            est["fase"] = "esperando_modelo_elegido"
-            estado_usuario[cid] = est
-            return
-
-        except Exception as e:
-            logging.error(f"❌ Error al enviar videos tras saludo: {e}")
-            await ctx.bot.send_message(cid, "❌ Hubo un error al cargar los videos.")
-  
-            return
-
     # 💬 Usuario pregunta por precios de modelos mostrados (uno o varios)
     if est.get("modelos_enviados") and any(p in texto for p in (
         "cuánto valen", "qué precio tienen", "cuánto cuestan", "precio de esos", "valen los",
@@ -2387,9 +2320,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "text": "❌ No encontré los precios exactos de esos modelos. ¿Quieres que te los confirme manualmente?",
                 "parse_mode": "Markdown"
             }
-
-
-
 
     # 💰 Usuario pregunta por precio de modelo ya mostrado (sin repetir imagen)
     if est.get("modelo") and est.get("color"):
@@ -3324,6 +3254,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 👟 Elegir talla (texto directo o confirmación de lengüeta)
     if est.get("fase") == "esperando_talla":
+
+        # 🛑 Si ya se confirmó la talla antes, evitar procesar este bloque de nuevo
+        if est.get("talla_confirmada"):
+            return await continuar_flujo_post_talla(ctx, cid, est, inv, numero)
+
         tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
         if isinstance(tallas, (int, float, str)):
             tallas = [str(tallas)]
@@ -3409,6 +3344,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
 
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
@@ -3742,10 +3678,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         txt_norm = normalize(txt_raw)
         metodo_detectado = None
 
-        # 🚫  Cliente se retracta o está confundido → volver a menú
-        if any(word in txt_norm for word in
-               ["NO QUIERO", "CAMBIAR", "OTRO METODO", "OTRO MÉTODO",
-                "OTRA OPCION", "OTRA OPCIÓN"]):
+        # 🚫 Cliente se retracta o está confundido → volver a menú
+        if any(word in txt_norm for word in [
+            "no quiero", "cambiar", "otro metodo", "otra opcion"
+        ]):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
@@ -3761,21 +3697,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return  # sigue en 'esperando_pago'
 
-        # 🔍  Detección directa sin difflib
-        if any(w in txt_norm for w in
-               ["NEQUI", "DAVIPLATA", "BANCOLOMBIA", "TRANSFERENCIA",
-                "ANTICIPADO", "QR", "PSE"]):
+        # 🔍 Detección directa sin difflib (todo en minúscula para que coincida con txt_norm)
+        if any(w in txt_norm for w in [
+            "nequi", "daviplata", "bancolombia", "transferencia",
+            "anticipado", "qr", "pse"
+        ]):
             metodo_detectado = "transferencia"
-        elif any(w in txt_norm for w in
-                 ["CONTRAENTREGA", "CONTRA ENTREGA", "CONTRAPAGO"]):
+        elif any(w in txt_norm for w in [
+            "contraentrega", "contra entrega", "contrapago"
+        ]):
             metodo_detectado = "contraentrega"
-        elif any(w in txt_norm for w in
-                 ["TARJETA", "CREDITO", "CRÉDITO", "VISA", "MASTERCARD"]):
+        elif any(w in txt_norm for w in [
+            "tarjeta", "credito", "credito", "visa", "mastercard"
+        ]):
             metodo_detectado = "tarjeta"
-        elif any(w in txt_norm for w in
-                 ["ADDI", "FINANCIACION", "FINANCIACIÓN", "CUOTAS"]):
+        elif any(w in txt_norm for w in [
+            "addi", "financiacion", "financiacion", "cuotas"
+        ]):
             metodo_detectado = "addi"
 
+        # ❌ No se detectó ningún método válido
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -3786,6 +3727,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             return
+
 
         resumen = est["resumen"]
         precio_original = est["precio_total"]
@@ -4591,11 +4533,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     memoria = cargar_memoria_usuario(cid)  # ← Esto resuelve el error
     logging.info(f"📦 Ciudad recuperada de memoria: {memoria.get('ciudad')}")
 
-   # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
+    # 📍 Detección libre de nombre y ciudad (solo si aún no están ambos guardados)
     try:
-        if not memoria.get("ciudad"):
+        if not (memoria.get("nombre") and memoria.get("ciudad")):
             texto_limpio = texto.strip().lower()
 
+            # 🔄 Detección combinada de nombre + ciudad
             match_dual = re.search(
                 r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
                 texto_limpio
@@ -4619,37 +4562,34 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     }
                 else:
                     logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+
+            # 👤 Si aún no hay nombre, detectar solo el nombre con IA
+            if not memoria.get("nombre"):
+                nombre_detectado = None
+
+                match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
+                if match_nombre:
+                    nombre_detectado = match_nombre.group(1).strip().title()
+                    logging.info(f"📛 Nombre detectado con regex: {nombre_detectado}")
+
+                if not nombre_detectado:
+                    nombre_detectado = detectar_nombre_ia_4mini(texto)
+                    logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
+
+                if nombre_detectado:
+                    memoria["nombre"] = nombre_detectado
+                    guardar_memoria_usuario(cid, "nombre", nombre_detectado)
+                    logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
+
+                    ciudad = memoria.get("ciudad", "tu ciudad")
+                    return {
+                        "type": "text",
+                        "text": f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                    }
+
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
 
-    # 👤 Si aún no hay nombre, intentar detectar solo el nombre con IA
-    try:
-        if not memoria.get("nombre"):
-            texto_limpio = texto.strip().lower()
-            nombre_detectado = None
-
-            match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
-            if match_nombre:
-                nombre_detectado = match_nombre.group(1).strip().title()
-                logging.info(f"📛 Nombre detectado con regex: {nombre_detectado}")
-
-            if not nombre_detectado:
-                nombre_detectado = detectar_nombre_ia_4mini(texto)
-                logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
-
-            if nombre_detectado:
-                memoria["nombre"] = nombre_detectado
-                guardar_memoria_usuario(cid, "nombre", nombre_detectado)
-                logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
-
-                ciudad = memoria.get("ciudad", "tu ciudad")
-                return {
-                    "type": "text",
-                    "text": f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
-                }
-
-    except Exception as e:
-        logging.error(f"❌ Error detectando nombre: {e}")
 
 
     # ─── FILTRO 1: mensaje vacío ───
