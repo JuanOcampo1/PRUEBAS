@@ -1313,7 +1313,6 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
-
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
     Detecta modelo y color comparando con nombres de carpetas Drive.
@@ -1350,16 +1349,11 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
                     return {
                         "modelo": modelo,
                         "color": color.title(),
-                        "marca": "DS",
-                        "type": "text",
-                        "text": (
-                            f"✅ Perfecto, tomaremos *DS {modelo}* color *{color.title()}*.\n"
-                            "📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* "
-                            "de tus tenis actuales 👟."
-                        )
+                        "marca": "DS"
                     }
 
     return None
+
 
 
 
@@ -2841,7 +2835,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ✅ Cargar carpetas desde Drive (para validación directa)
         carpetas_en_drive = listar_carpetas_drive()
-
         resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
@@ -2879,6 +2872,17 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+            # ⚠️ Modelo/color detectados, pero no disponibles en inventario
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🧐 Detecté el modelo y color, pero no está disponible en este momento.\n"
+                    "Puedes enviarme otra imagen o elegir otro modelo si deseas."
+                ),
+                parse_mode="Markdown"
+            )
+            os.remove(tmp)
+            return  # ❗ IMPORTANTE: no pasar a CLIP si ya hubo resultado OCR
 
 
 
@@ -2913,8 +2917,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
-
-
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -4538,9 +4540,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         if not (memoria.get("nombre") and memoria.get("ciudad")):
             texto_limpio = texto.strip().lower()
 
+            # 🧹 Evitar frases confusas como "y soy dePereira"
+            texto_limpio = texto_limpio.replace(" y soy ", " ")
+            texto_limpio = texto_limpio.replace("soy soy", "soy")
+            texto_limpio = texto_limpio.replace("me llamo soy", "me llamo")
+
             # 🔄 Detección combinada de nombre + ciudad
             match_dual = re.search(
-                r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
                 texto_limpio
             )
 
@@ -4558,12 +4565,19 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
                     return {
                         "type": "text",
-                        "text": f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        "text": (
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        )
                     }
                 else:
                     logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+                    return {
+                        "type": "text",
+                        "text": "😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                    }
 
-            # 👤 Si aún no hay nombre, detectar solo el nombre con IA
+            # 👤 Si no detectó ciudad, intentar detectar solo el nombre
             if not memoria.get("nombre"):
                 nombre_detectado = None
 
@@ -4584,12 +4598,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     ciudad = memoria.get("ciudad", "tu ciudad")
                     return {
                         "type": "text",
-                        "text": f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        "text": (
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        )
                     }
 
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
-
 
 
     # ─── FILTRO 1: mensaje vacío ───
