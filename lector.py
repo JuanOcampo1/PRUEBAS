@@ -3241,10 +3241,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👟 Manejo unificado de talla escrita o confirmación (evita repeticiones)
     if est.get("fase") == "esperando_talla":
 
-        # ✅ Si ya se confirmó, no repetir
-        if est.get("talla_confirmada"):
-            return
-
         tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
         if isinstance(tallas_disponibles, (int, float, str)):
             tallas_disponibles = [str(tallas_disponibles)]
@@ -3254,44 +3250,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ✅ Confirmación posterior a talla pendiente
         if "talla_pendiente_confirmar" in est and any(p in txt_norm for p in ["si", "sí", "exacto", "eso"]):
-            est["talla"] = est.pop("talla_pendiente_confirmar")
+            est["talla"] = est.get("talla_pendiente_confirmar")
+            est.pop("talla_pendiente_confirmar", None)
             est["talla_confirmada"] = True
             estado_usuario[cid] = est
 
-            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-            if os.path.exists(ruta):
-                with open(ruta, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-
-                return {
-                    "type": "multi",
-                    "messages": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"✅ Perfecto, tomamos la talla *{est['talla']}* para el pedido.\n\n"
-                                "📸 Si más tarde puedes, sería genial que envíes una foto de la lengüeta para mayor seguridad 👟.\n"
-                                "_Si la talla no coincide al llegar, el cambio tiene costo de envío._"
-                            ),
-                            "parse_mode": "Markdown"
-                        },
-                        {
-                            "type": "photo",
-                            "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "Así debe verse la lengüeta por si puedes enviarla luego 📸"
-                        }
-                    ]
-                }
-
-            return {
-                "type": "text",
-                "text": (
-                    f"✅ Perfecto, tomamos la talla *{est['talla']}* para el pedido.\n\n"
-                    "📸 Si más tarde puedes, sería genial que envíes una foto de la lengüeta para mayor seguridad 👟.\n"
-                    "_Si la talla no coincide al llegar, el cambio tiene costo de envío._"
-                ),
-                "parse_mode": "Markdown"
-            }
+            # Ya no se envía imagen — el flujo principal ahora llevará al resumen o a pedir nombre
+            return
 
         # 🚀 Detección directa si cliente escribe talla
         if entrada_num:
@@ -3356,7 +3321,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
-
 
     # 👟 Elegir talla (texto directo o confirmación de lengüeta)
     if est.get("fase") == "esperando_talla":
