@@ -1313,6 +1313,7 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
+
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
     Detecta modelo y color comparando con nombres de carpetas Drive.
@@ -1353,9 +1354,6 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
                     }
 
     return None
-
-
-
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2153,14 +2151,25 @@ def extraer_dia_hora(txt):
     return m.group() if m else "No especificado"
 import re
 
-# 🎨 Alias de color (bidireccional + plurales)
 color_aliases = {
+    # Sinónimos
     "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
-    "celeste": "azul", "azules": "azul",
-    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
-    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
-    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
+    "celeste": "azul", "azulito": "aqua", "azul claro": "aqua", "azul clarito": "aqua", "azul cielo": "aqua",
+    "verde limon": "verde", "verde limón": "verde",
+
+    # Plurales
+    "verdes": "verde", "azules": "azul", "amarillas": "amarillo", "amarillos": "amarillo",
+    "rojos": "rojo", "rosados": "fucsia", "fucsias": "fucsia",
+    "naranjas": "naranja", "blancos": "blanco", "negros": "negro", "grises": "gris",
+    "morados": "morado", "cafés": "café", "beiges": "beige",
+
+    # Colores base mapeados a sí mismos (asegura alias inverso)
+    "negro": "negro", "blanco": "blanco", "rojo": "rojo", "azul": "azul", "amarillo": "amarillo",
+    "verde": "verde", "gris": "gris", "morado": "morado", "naranja": "naranja",
+    "café": "café", "beige": "beige", "neón": "neón", "limón": "limón",
+    "fucsia": "fucsia", "aqua": "aqua", "turquesa": "aqua"
 }
+
 
 # 🚀 Agregar alias inversos automáticamente
 for base_color in list(color_aliases.values()):
@@ -2838,8 +2847,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
         if resultado:
-            modelo_solo = normalize(resultado["modelo"])
-            color_detectado = normalize(resultado["color"])
+            modelo_solo = normalize(resultado.get("modelo", ""))
+            color_detectado = normalize(resultado.get("color", ""))
 
             item = next(
                 (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
@@ -2848,28 +2857,33 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             if item:
                 est.update({
-                    "marca": resultado["marca"],
-                    "modelo": resultado["modelo"],
-                    "color": resultado["color"],
+                    "marca": resultado.get("marca", "DS"),
+                    "modelo": resultado.get("modelo", "???"),
+                    "color": resultado.get("color", "Desconocido"),
                     "precio_total": item["precio"],
                     "fase": "esperando_talla"
                 })
                 estado_usuario[cid] = est
                 os.remove(tmp)
 
-                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
+                marca = resultado.get("marca", "DS")
+                modelo = resultado.get("modelo", "???")
+                nombre_bonito = f"{marca} {modelo}"
                 precio = item["precio"]
 
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
-                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"¿Seguimos con la compra?"
-                    ),
-                    parse_mode="Markdown"
-                )
+                try:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                            f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            f"¿Seguimos con la compra?"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
                 return
 
             # ⚠️ Modelo/color detectados, pero no disponibles en inventario
@@ -2883,8 +2897,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             os.remove(tmp)
             return  # ❗ IMPORTANTE: no pasar a CLIP si ya hubo resultado OCR
-
-
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
         with open(tmp, "rb") as f_img:
@@ -3177,18 +3189,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if isinstance(tallas_disponibles, (int, float, str)):
             tallas_disponibles = [str(tallas_disponibles)]
 
-        txt_norm = normalize(txt)
+        txt_norm = normalize(txt).lower()          # ⬅️ ahora todo en minúsculas
         entrada_num = re.findall(r"\d+\.?\d*", txt_norm)
 
         # ✅ Confirmación posterior a talla pendiente
-        if "talla_pendiente_confirmar" in est and any(p in txt_norm for p in ["si", "sí", "exacto", "eso"]):
-            est["talla"] = est.get("talla_pendiente_confirmar")
-            est.pop("talla_pendiente_confirmar", None)
+        if "talla_pendiente_confirmar" in est and any(
+                p in txt_norm for p in (
+                    "si", "sí", "s", "exacto", "eso", "dale",
+                    "claro", "confirmo", "correcto"
+                )):
+            est["talla"] = est.pop("talla_pendiente_confirmar")
             est["talla_confirmada"] = True
             estado_usuario[cid] = est
-
-            # Ya no se envía imagen — el flujo principal ahora llevará al resumen o a pedir nombre
-            return
+            return await continuar_flujo_post_talla(ctx, cid, est, inv, numero)
 
         # 🚀 Detección directa si cliente escribe talla
         if entrada_num:
@@ -3213,10 +3226,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 confirmacion = f"¿Te refieres a *{talla_escrita} cm*?"
             elif "usa" in txt_norm or float(talla_escrita) <= 14:
                 confirmacion = f"¿Te refieres a *talla USA {talla_escrita}*?"
-            elif int(float(talla_escrita)) >= 35 and int(float(talla_escrita)) <= 48:
+            elif 35 <= int(float(talla_escrita)) <= 48:
                 confirmacion = f"¿Te refieres a *talla colombiana {talla_escrita}*?"
             else:
-                confirmacion = f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
+                confirmacion = (
+                    f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
+                )
 
             est["talla_pendiente_confirmar"] = talla_escrita
             estado_usuario[cid] = est
@@ -3227,7 +3242,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             }
 
         # 🗨️ Cliente dice que no puede enviar la lengüeta
-        if any(p in txt_norm for p in ["no tengo zapato", "no puedo", "no tengo", "no estoy en casa", "sin lengüeta", "no tengo zapato a la mano"]):
+        if any(p in txt_norm for p in (
+                "no tengo zapato", "no puedo", "no tengo", "no estoy en casa",
+                "sin lengüeta", "no tengo zapato a la mano")):
             return {
                 "type": "text",
                 "text": (
@@ -3253,6 +3270,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
 
     # 👟 Elegir talla (texto directo o confirmación de lengüeta)
     if est.get("fase") == "esperando_talla":
@@ -4535,9 +4553,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     memoria = cargar_memoria_usuario(cid)  # ← Esto resuelve el error
     logging.info(f"📦 Ciudad recuperada de memoria: {memoria.get('ciudad')}")
 
-    # 📍 Detección libre de nombre y ciudad (solo si aún no están ambos guardados)
+    # 📍 Detección libre de nombre y ciudad (solo si aún no están ambos guardados y ya se envió el welcome)
     try:
-        if not (memoria.get("nombre") and memoria.get("ciudad")):
+        if not (memoria.get("nombre") and memoria.get("ciudad")) and est.get("welcome_enviado"):
             texto_limpio = texto.strip().lower()
 
             # 🧹 Evitar frases confusas como "y soy dePereira"
@@ -4561,21 +4579,24 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
                     guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
                     guardar_memoria_usuario(cid, "nombre", nombre_detectado)
-                    logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
+                    logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_detectada}")
 
-                    return {
-                        "type": "text",
-                        "text": (
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
                             f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
                             "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
-                    }
+                    )
+                    return
+
                 else:
-                    logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
-                    return {
-                        "type": "text",
-                        "text": "😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
-                    }
+                    logging.warning(f"❌ Ciudad detectada pero no válida: {ciudad_detectada}")
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                    )
+                    return
 
             # 👤 Si no detectó ciudad, intentar detectar solo el nombre
             if not memoria.get("nombre"):
@@ -4596,16 +4617,18 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
 
                     ciudad = memoria.get("ciudad", "tu ciudad")
-                    return {
-                        "type": "text",
-                        "text": (
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
                             f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
                             "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
-                    }
+                    )
+                    return
 
     except Exception as e:
-        logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
+        logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
+
 
 
     # ─── FILTRO 1: mensaje vacío ───
