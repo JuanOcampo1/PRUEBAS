@@ -77,6 +77,10 @@ def normalizar(texto: str) -> str:
     texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.upper().strip()
 
+from openai import OpenAI
+
+client = OpenAI(api_key=OPENAI_API_KEY)  # O usa os.getenv("OPENAI_API_KEY")
+
 def detectar_nombre_ia_4mini(texto: str) -> str:
     """
     Usa GPT-4.0 mini (económico) para detectar el nombre de la persona desde un mensaje.
@@ -89,19 +93,18 @@ Nombre:
 """
 
     try:
-        respuesta = openai.ChatCompletion.create(
-            model="gpt-4-0613",  # Este se enruta como GPT-4 mini si tienes el plan configurado así
+        respuesta = client.chat.completions.create(
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10
         )
-        nombre = respuesta["choices"][0]["message"]["content"].strip()
+        nombre = respuesta.choices[0].message.content.strip()
         return nombre
 
     except Exception as e:
         print(f"❌ Error en detectar_nombre_ia_4mini: {e}")
         return None
-
 
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
@@ -2423,7 +2426,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 🛑 Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
-            await ctx.bot.send_message(cid, "❓ Dime cuál te gustó de las que te mandé.")
+            await ctx.bot.send_message(cid, "❓ Dime el numero de la referencia exacto pa que te lo mandemos hoy mismo📦.")
             return
 
 
@@ -2513,43 +2516,59 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "parse_mode": "Markdown"
         }
 
-    # ─────────────────────────────────────────────
-    # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
-    # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
+# ─────────────────────────────────────────────
     texto_normalizado = normalize(txt)
 
+    # Palabras clave que siempre deben activar la respuesta
+    palabras_clave_fijas = [
+        "robar", "roban", "robo", "estafa", "estafan", "estafaron", "estafas",
+        "fraude", "tumbo", "tumbaron"
+    ]
+
+    # Frases comunes de desconfianza
     frases_desconfianza = [
-        "no confio", "desconfio", "me han robado", "PERO YO COMO SE QUE NO ME VAN A ROBAR", "ya me robaron", "y si me roban",
+        "no confio", "desconfio", "me han robado", "ya me robaron", "y si me roban",
         "me estafaron", "ya me estafaron", "me hicieron el robo", "como se que no me van a robar",
         "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
         "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
-        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "Como se que no me roban",
-        "quiero pagar al recibir", "pago al recibir", "solo contraentrega", "pago cuando llegue",
-        "cuando me lleguen pago", "Como se que no me van a robar", "pago cuando me llegue", "me tumbaron una vez",
-        "me jodieron", "ya me tumbaron", "no vuelvo a caer", "yo como se que no me roban", "eso me paso antes",
-        "no me sale el mensaje", "no me abre el link", "me han robado antes", "me da cosa pagar",
+        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "quiero pagar al recibir",
+        "pago al recibir", "solo contraentrega", "pago cuando llegue", "pago cuando me llegue",
+        "me tumbaron una vez", "me jodieron", "ya me tumbaron", "no vuelvo a caer",
+        "yo como se que no me roban", "eso me paso antes", "me han robado antes", "me da cosa pagar",
         "no puedo pagar sin saber", "no mando dinero asi", "no conozco su tienda", "no estoy seguro",
-        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable?",
-        "no tengo pruebas", "es seguro esto?", "no me siento comodo pagando", "mejor contraentrega",
-        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "me estafaron antes",
-        "me robaron antes", "y si no me llega", "y si no llega", "y si me estafan", "me robaron antes",
-        "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
-        "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro", "y si es mentira",
-        "y si es estafa", "robo", "yo no pago sin ver", "yo no mando plata asi", "robado",
-        "esto parece raro", "y si no cumplen", "y si no es verdad", "parece una estafa", "se ve raro",
+        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable",
+        "no tengo pruebas", "es seguro esto", "no me siento comodo pagando", "mejor contraentrega",
+        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "y si no me llega",
+        "y si no llega", "y si me estafan", "ya me tumbaron plata", "me hicieron perder plata",
+        "me quitaron la plata", "me da miedo que me estafen", "esto no parece seguro",
+        "no se ve seguro", "y si es mentira", "y si es estafa", "esto parece raro", "se ve raro",
         "esto huele a estafa", "muy sospechoso", "no quiero perder plata", "no me arriesgo",
-        "no voy a arriesgar mi dinero"
+        "no voy a arriesgar mi dinero", "no envio plata por adelantado", "yo no envio plata",
+        "yo no mando plata", "yo no pago por adelantado", "envio plata y me roban"
     ]
 
-    # 🟥 Desconfianza: envía videos + audio de confianza
+    # 🟥 Desconfianza: envía audio + videos de confianza
     if any(frase in texto_normalizado for frase in frases_desconfianza):
         carpeta_videos = "/var/data/videos"
         audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
 
-        mensajes = [{
-            "type": "text",
-            "text": "🤝 Entendemos tu preocupación. Te compartimos estos videos para que veas que somos una tienda real y seria."
-        }]
+        mensajes = []
+
+        # 🎧 Primero: audio
+        if os.path.exists(audio_path):
+            try:
+                with open(audio_path, "rb") as f:
+                    mensajes.append({
+                        "type": "audio",
+                        "base64": base64.b64encode(f.read()).decode("utf-8"),
+                        "mimetype": "audio/mpeg",
+                        "filename": "Desconfianza.mp3",
+                        "text": "🎧 Escucha este audio breve también:"
+                    })
+            except Exception as e:
+                logging.warning(f"⚠️ No se pudo leer el audio de confianza: {e}")
 
         # ✅ Lista exacta de videos válidos
         videos_confianza = {
@@ -2557,6 +2576,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "WhatsApp Video 2025-05-28 at 4.26.50 PM.mp4"
         }
 
+        # 🎥 Luego: videos
         for archivo in sorted(os.listdir(carpeta_videos)):
             if archivo in videos_confianza:
                 ruta_video = os.path.join(carpeta_videos, archivo)
@@ -2567,20 +2587,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             "base64": base64.b64encode(f.read()).decode("utf-8"),
                             "mimetype": "video/mp4",
                             "filename": archivo,
-                            "text": f"🎥 Mira este video de confianza:"
+                            "text": "🎥 Mira este video de confianza:"
                         })
                 except Exception as e:
                     logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
-
-        if os.path.exists(audio_path):
-            with open(audio_path, "rb") as f:
-                mensajes.append({
-                    "type": "audio",
-                    "base64": base64.b64encode(f.read()).decode("utf-8"),
-                    "mimetype": "audio/mpeg",
-                    "filename": "Desconfianza.mp3",
-                    "text": "🎧 Escucha este audio breve también:"
-                })
 
         await reanudar_fase_actual(cid, ctx, est)
         return {"type": "multi", "messages": mensajes}
@@ -2921,32 +2931,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         }
 
 
-    # 📷 Confirmación si la imagen detectada fue correcta
+    # 📷 Fase: imagen_detectada — cliente pide talla → responder directo con lengüeta
     if est.get("fase") == "imagen_detectada":
+        marca = est.get("marca", "DS").upper()
+        modelo = est.get("modelo", "").upper()
+        color_archivo = est.get("color", "").upper()
 
-        # 🆕 Pregunta directa por disponibilidad de talla
-        consulta_talla = re.search(
-            r"(?:tienen|tiene|hay|maneja(?:n)?)\s+talla\s+(\d{1,2})",
-            txt
-        )
-        if consulta_talla:
-            talla_pedida = consulta_talla.group(1)
+        # 🔍 Buscar talla directamente sin preguntar
+        match_talla = re.search(r"(?:tienen|tiene|hay|manejan|disponible)?\s*(?:talla)?\s+(\d{1,2})", texto_normalizado)
+        if match_talla:
+            talla = match_talla.group(1).strip()
+            est["talla"] = talla
             est["fase"] = "esperando_talla"
             estado_usuario[cid] = est
 
-            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-            if os.path.exists(ruta):
-                with open(ruta, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
+            mensaje_inicial = (
+                f"✅ Perfecto, tomaremos *{marca} {modelo} {color_archivo}* en talla *{talla}*.\n"
+            )
 
+            ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta_ejemplo):
+                with open(ruta_ejemplo, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
                 return {
                     "type": "multi",
                     "messages": [
                         {
                             "type": "text",
                             "text": (
-                                f"✅ ¡Claro que tenemos talla {talla_pedida}! "
-                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                mensaje_inicial +
+                                "📸 Para confirmar la talla exacta, mándame una foto de la *lengüeta* "
                                 "del zapato que usas normalmente 👟."
                             ),
                             "parse_mode": "Markdown"
@@ -2958,15 +2972,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         }
                     ]
                 }
-            else:
-                return {
-                    "type": "text",
-                    "text": (
-                        f"✅ ¡Claro que tenemos talla {talla_pedida}! "
-                        "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
-                    ),
-                    "parse_mode": "Markdown"
-                }
+
+            return {
+                "type": "text",
+                "text": (
+                    mensaje_inicial +
+                    "📸 Envíame una foto de la lengüeta de tu zapato para confirmar la medida 👟."
+                ),
+                "parse_mode": "Markdown"
+            }
+
 
         # ✔️ Respuesta afirmativa para avanzar en la compra
         if any(frase in txt for frase in (
@@ -3258,19 +3273,29 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "parse_mode": "Markdown"
                 }
 
-            # 🚧 No pude convertir → pedir aclaración
+            # 🚧 No pude convertir → pedir aclaración o confirmar sin lengüeta
             if "cm" in txt_norm:
                 confirm = f"¿Te refieres a *{talla_escrita} cm*?"
             elif "usa" in txt_norm or float(talla_escrita) <= 14:
                 confirm = f"¿Te refieres a *talla USA {talla_escrita}*?"
             elif 35 <= int(float(talla_escrita)) <= 48:
-                confirm = f"¿Te refieres a *talla colombiana {talla_escrita}*?"
+                confirm = (
+                    f"👟 ¿Seguro que eres *talla {talla_escrita} colombiana*?\n\n"
+                    "📸 Nosotros normalmente pedimos la foto de la *lengüeta* para enviarte la talla ideal.\n"
+                    "Pero si no puedes enviarla, *seguimos con esta talla bajo tu responsabilidad*.\n\n"
+                    "🚨 En caso de devolución, los costos de envío correrán por tu cuenta. ¿Confirmamos?"
+                )
             else:
                 confirm = f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
 
             est["talla_pendiente_confirmar"] = talla_escrita
             estado_usuario[cid] = est
-            return {"type": "text", "text": f"🧐 {confirm}", "parse_mode": "Markdown"}
+            return {
+                "type": "text",
+                "text": confirm,
+                "parse_mode": "Markdown"
+            }
+
 
         # 🗨️ Cliente no puede mandar lengüeta
         if any(p in txt_norm for p in (
@@ -3306,10 +3331,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
         if est.get("confirmacion_pendiente"):
-            if any(p in txt.lower() for p in (
-                "si", "sí", "correcto", "ok", "listo", "vale", "dale",
-                "todo bien", "todo correcto", "está bien", "esta bien"
-            )):
+            respuestas_positivas = [
+                "si", "sí", "correcto", "correctos", "ok", "listo", "vale", "dale",
+                "todo bien", "todo correcto", "está bien", "esta bien", "todo está bien",
+                "estan correctos", "es correcto", "son correctos", "está todo bien", "bien", "perfecto"
+            ]
+
+            txt_norm = normalize(txt)
+            if any(txt_norm == p or p in txt_norm for p in respuestas_positivas):
                 est["confirmacion_pendiente"] = False
                 est["fase"] = "esperando_pago"
 
@@ -3471,7 +3500,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Mandame tu correo pa que sigamos con la compra😊.",
+                text="Necesito que envies tu correo para podes seguir con la compra de tu producto😊.",
                 parse_mode="Markdown"
             )
         return
@@ -3489,7 +3518,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Este no parece un telefono real manda el tuyo porfa.",
+                text="Necesito tu telefono primero para poder seguir con tu venta📱.",
                 parse_mode="Markdown"
             )
         return
@@ -3507,7 +3536,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Tu cedula real para el pedido porfavor.",
+                text="🪪Necesito tu cedula para seguir con la compra mandala primero antes de cualquier otra duda.",
                 parse_mode="Markdown"
             )
         return
@@ -4579,23 +4608,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
-        # FAQ 1: ¿Cuánto demora el envío?
+        # 📦 Pregunta sobre tiempo de entrega
         if any(p in texto for p in (
-                "cuanto demora", "cuanto tarda", "cuanto se demora",
-                "en cuanto llega", "me llega rapido", "llegan rapido",
-                "cuántos días", "cuanto se demoran", "días en llegar",
-                "si lo pido hoy", "si hago el pedido hoy", "si los pido hoy", "cuando me llegan"
+            "cuanto demora", "cuanto tarda", "cuanto se demora", "cuanto se tarda", "cuanto tarda en llegar",
+            "cuanto demora en llegar", "cuanto se demora en llegar", "cuanto se tarda en llegar",
+            "en cuanto llega", "en cuantos dias llega", "cuantos dias tarda", "cuantos dias demora",
+            "cuantos dias se demora", "cuantos dias se tarda", "cuantos dias se tarda en llegar",
+            "cuántos días", "dias en llegar", "cuanto llega",
+            "me llega rapido", "llegan rapido", "cuando me llega", "cuando me llegan",
+            "si lo pido hoy", "si hago el pedido hoy", "si los pido hoy"
         )):
             return {
                 "type": "text",
                 "text": (
                     "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                    "pero generalmente tarda *2 hábiles* en llegar.\n\n"
+                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
                     "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
                     "En ese caso aplica *pago anticipado* (no contra entrega)."
                 ),
                 "parse_mode": "Markdown"
             }
+
 
 
         # FAQ 2: ¿Pago contra entrega?
@@ -4641,7 +4674,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
         # FAQ 5: ¿Dónde están ubicados?
-        if any(p in texto for p in (
+        if any(normalizar(p) in normalizar(texto) for p in (
             "donde estan ubicados", "donde estan", "ubicacion", "ubicación",
             "direccion", "tienda fisica", "donde es la tienda",
             "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
@@ -4670,6 +4703,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "parse_mode": "Markdown"
                 }
             ]
+
 
             # ✅ Verificar ciudad en memoria
             memoria_persistente = cargar_memoria_usuario(cid)
@@ -4782,7 +4816,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # FAQ 11: ¿Las tallas son normales?
         if any(p in texto for p in (
-            "las tallas son normales", "horma normal", "talla normal",
+            "las tallas son normales", "horma", "talla normal",
             "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
             "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
         )):
@@ -4798,7 +4832,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # FAQ 12: ¿Talla más grande?
         if any(p in texto for p in (
             "talla mas grande", "talla más grande", "cual es la talla mas grande",
-            "horma", "mayor talla", "talla maxima", "talla máxima"
+             "mayor talla", "talla maxima", "talla máxima"
         )):
             return {
                 "type": "text",
@@ -4888,9 +4922,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
     # FAQ: ¿La suela es de caucho?
-    if any(p in texto_normalizado for p in (
-        "SUELA DE CAUCHO", "ES DE CAUCHO", "LA SUELA ES DE",
-        "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
+    if any(p in texto_normalizado.lower() for p in (
+        "caucho", "goma", "suela de caucho", "es de caucho", "la suela es de",
+        "la suela de qué es", "la suela de que es", "material de la suela"
     )):
         try:
             ruta_audio = "/var/data/audios/caucho/caucho.mp3"
@@ -4914,6 +4948,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ No pude enviar el audio en este momento."
             }
+
 
     texto = texto.lower()
 
@@ -4986,29 +5021,50 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             ),
             "parse_mode": "Markdown"
         }
-
-    # 4️⃣ 💳 Métodos de pago
+    # 4️⃣ 💳 Métodos de pago (explicación detallada con nombre)
     if any(p in texto for p in (
         "método de pago", "metodos de pago", "formas de pago", "formas para pagar",
-        "como pago", "cómo puedo pagar", "qué medios de pago", "medios de pago", "aceptan nequi",
-        "pago por daviplata", "manejan bancolombia", "que pago manejan", "que pagos manejan"
+        "como pago", "cómo puedo pagar"
     )):
-        ruta_metodo = "/var/data/extra/metodosdepago.jpeg"
-        if os.path.exists(ruta_metodo):
-            with open(ruta_metodo, "rb") as f:
+        nombre = memoria.get("nombre", "cliente").strip().title()
+
+        return {
+            "type": "text",
+            "text": (
+                f"{nombre}, Estos son nuestros metodos de pago. 😊\n\n"
+                "Tenemos *4 formas de pago* 💰:\n\n"
+                "1.⁠ ⁠💵 *Pago anticipado* con el *5% de descuento*\n"
+                "2.⁠ ⁠✈️ *Pago contra entrega parcial*: haces un abono de $30.000 y el restante lo pagas "
+                "a la transportadora al recibir el calzado.\n"
+                "3.⁠ ⁠💳 *Tarjeta de crédito*\n"
+                "4.⁠ ⁠💙 *Crédito a cuotas* por medio de *Addi*\n\n"
+                "¿Por cuál medio deseas hacer el pago❓"
+            ),
+            "parse_mode": "Markdown"
+        }
+
+    # 4️⃣ 💳 Medios de pago (imagen)
+    if any(p in texto for p in (
+        "qué medios de pago", "medios de pago", "aceptan nequi",
+        "pago por daviplata", "manejan bancolombia", "que pago manejan", "que pagos manejan",
+        "puedo pagar con", "se puede pagar con", "nequi", "daviplata", "bancolombia", "contraentrega"
+    )):
+        ruta_medios = "/var/data/extra/metodosdepago.jpeg"
+        if os.path.exists(ruta_medios):
+            with open(ruta_medios, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
                 return {
                     "type": "multi",
                     "messages": [
                         {
                             "type": "text",
-                            "text": "💳 Estos son los *métodos de pago* que manejamos actualmente:",
+                            "text": "💳 Estos son los *medios de pago* que manejamos actualmente:",
                             "parse_mode": "Markdown"
                         },
                         {
                             "type": "photo",
                             "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "📷 Métodos de pago disponibles"
+                            "text": "📷 Medios de pago disponibles"
                         }
                     ]
                 }
@@ -5017,6 +5073,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "💳 Aceptamos *Nequi, Daviplata, Bancolombia* y también *contraentrega*."
             }
+
 
 
     # Lista de palabras afirmativas comunes
