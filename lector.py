@@ -192,19 +192,9 @@ FAQ_ALIAS = {
         "mayor talla", "talla maxima", "talla máxima"
     ]
 }
-
 def detectar_match_faq(texto_usuario: str, diccionario_faqs: dict, umbral: int = 90) -> str:
-    """
-    Detecta si el texto del usuario coincide con alguna clave de FAQ, 
-    aunque esté mal escrito. Usa RapidFuzz para encontrar coincidencias difusas.
-    
-    :param texto_usuario: El mensaje escrito por el usuario.
-    :param diccionario_faqs: Un diccionario donde la clave es el nombre de la FAQ y 
-                              el valor es una lista de posibles frases o errores comunes.
-    :param umbral: Porcentaje mínimo de similitud (0–100) para considerar una coincidencia.
-    :return: La clave de la FAQ detectada, o None si no hay coincidencia.
-    """
-    texto = texto_usuario.lower()
+    texto = texto_usuario.lower().strip()
+    print(f"🧪 Texto recibido para FAQ: '{texto}'")
 
     for clave, alias_list in diccionario_faqs.items():
         match = process.extractOne(texto, alias_list, score_cutoff=umbral)
@@ -4624,20 +4614,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     guardar_memoria_usuario(cid, "nombre", nombre_detectado)
                     logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_detectada}")
 
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
-                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                    if 'ctx' in locals():
+                        await ctx.bot.send_message(
+                            chat_id=cid,
+                            text=(
+                                f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
+                                "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                            )
                         )
-                    )
                     return
                 else:
                     logging.warning(f"❌ Ciudad detectada pero no válida: {ciudad_detectada}")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
-                    )
+                    if 'ctx' in locals():
+                        await ctx.bot.send_message(
+                            chat_id=cid,
+                            text="😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                        )
                     return
 
             # 👤 Si no detectó ciudad, intentar detectar solo el nombre
@@ -4659,13 +4651,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
 
                     ciudad = memoria.get("ciudad", "tu ciudad")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
-                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                    if 'ctx' in locals():
+                        await ctx.bot.send_message(
+                            chat_id=cid,
+                            text=(
+                                f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
+                                "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                            )
                         )
-                    )
                     return
 
     except Exception as e:
