@@ -1313,6 +1313,8 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
+
+
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
     Detecta modelo y color comparando con nombres de carpetas Drive.
@@ -2842,56 +2844,54 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
 
-        # ✅ Cargar carpetas desde Drive (para validación directa)
+        # ✅ Buscar modelo/color en carpetas Drive
         carpetas_en_drive = listar_carpetas_drive()
-        resultados = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
-        if resultados and isinstance(resultados, list):
-            for resultado in resultados:
-                modelo_solo = normalize(resultado.get("modelo", ""))
-                color_detectado = normalize(resultado.get("color", ""))
+        if resultado:   # ← aquí la corrección
+            modelo_solo     = normalize(resultado["modelo"])
+            color_detectado = normalize(resultado["color"])
 
-                item = next(
-                    (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
-                    None
-                )
+            item = next(
+                (i for i in inv
+                 if normalize(i["modelo"]) == modelo_solo
+                 and normalize(i["color"])  == color_detectado),
+                None
+            )
 
-                if item:
-                    est.update({
-                        "marca": resultado.get("marca", "DS"),
-                        "modelo": resultado.get("modelo", "???"),
-                        "color": resultado.get("color", "Desconocido"),
-                        "precio_total": item.get("precio", 0),
-                        "fase": "esperando_talla"
-                    })
-                    estado_usuario[cid] = est
+            if item:
+                est.update({
+                    "marca":        resultado["marca"],
+                    "modelo":       resultado["modelo"],
+                    "color":        resultado["color"],
+                    "precio_total": item["precio"],
+                    "fase":         "esperando_talla"
+                })
+                estado_usuario[cid] = est
 
-                    marca = est["marca"]
-                    modelo = est["modelo"]
-                    color = est["color"]
-                    precio = est["precio_total"]
-                    nombre_bonito = f"{marca} {modelo}"
+                nombre_bonito = f"{est['marca']} {est['modelo']}"
+                precio        = est["precio_total"]
 
-                    try:
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text=(
-                                f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                                f"¿Seguimos con la compra?"
-                            ),
-                            parse_mode="Markdown"
-                        )
-                    except Exception as e:
-                        logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
-                            parse_mode="Markdown"
-                        )
-                    os.remove(tmp)
-                    return  # ✅ OCR exitoso, no seguir a CLIP
+                try:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{est['color']}* están brutales 😎.\n"
+                            f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            f"¿Seguimos con la compra?"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
+                        parse_mode="Markdown"
+                    )
+                os.remove(tmp)
+                return  # ✅ OCR exitoso, no pasar a CLIP
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia válida
         with open(tmp, "rb") as f_img:
@@ -2905,10 +2905,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if modelo_detectado:
                 p = modelo_detectado[0].split("_")
                 est.update({
-                    "marca": p[0] if len(p) > 0 else "Desconocida",
+                    "marca":  p[0] if len(p) > 0 else "Desconocida",
                     "modelo": p[1] if len(p) > 1 else "Desconocido",
-                    "color": p[2] if len(p) > 2 else "Desconocido",
-                    "fase": "imagen_detectada"
+                    "color":  p[2] if len(p) > 2 else "Desconocido",
+                    "fase":   "imagen_detectada"
                 })
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -2924,6 +2924,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
 
     # 📷 Confirmación si la imagen detectada fue correcta
