@@ -2855,15 +2855,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         logging.debug(f"🎯 Resultado detectar_modelo_color: {resultado}")
 
         if resultado:
-            modelo_solo     = normalize(resultado["modelo"])
-            color_detectado = normalize(resultado["color"])
+            modelo_solo     = normalize(str(resultado["modelo"]))      # «str» evita ints
+            color_detectado = normalize(str(resultado["color"]))
             print(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
             logging.debug(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
 
             item = next(
                 (i for i in inv
-                 if normalize(i["modelo"]) == modelo_solo
-                 and normalize(i["color"])  == color_detectado),
+                 if normalize(str(i["modelo"])) == modelo_solo
+                 and normalize(str(i["color"]))  == color_detectado),
                 None
             )
 
@@ -2883,59 +2883,42 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 nombre_bonito = f"{est['marca']} {est['modelo']}"
                 precio        = est["precio_total"]
 
-                try:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{est['color']}* están brutales 😎.\n"
-                            f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                            f"¿Seguimos con la compra?"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
-                        parse_mode="Markdown"
-                    )
-                os.remove(tmp)
-                return  # ✅ OCR exitoso, no pasar a CLIP
+                # 👉 Venom espera un JSON con type/text
+                return {
+                    "type": "text",
+                    "text": (
+                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{est['color']}* están brutales 😎.\n"
+                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                        "¿Seguimos con la compra?"
+                    ),
+                    "parse_mode": "Markdown"
+                }
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia válida
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
 
-        mensaje = await identificar_modelo_desde_imagen(base64_img)
-        logging.debug(f"📸 Resultado CLIP: {mensaje}")
+        mensaje_clip = await identificar_modelo_desde_imagen(base64_img)
+        logging.debug(f"📸 Resultado CLIP: {mensaje_clip}")
 
-        if "coincide con *" in mensaje.lower():
-            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
-            if modelo_detectado:
-                p = modelo_detectado[0].split("_")
-                est.update({
-                    "marca":  p[0] if len(p) > 0 else "Desconocida",
-                    "modelo": p[1] if len(p) > 1 else "Desconocido",
-                    "color":  p[2] if len(p) > 2 else "Desconocido",
-                    "fase":   "imagen_detectada"
-                })
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=mensaje + "\n¿Continuamos? (SI/NO)",
-                reply_markup=menu_botones(["SI", "NO"]),
-                parse_mode="Markdown"
+        if "coincide con *" in mensaje_clip.lower():
+            return {
+                "type": "text",
+                "text": mensaje_clip + "\n¿Continuamos? (SI/NO)"
+            }
+
+        # ❌ Ni OCR ni CLIP reconocieron
+        reset_estado(cid)
+        return {
+            "type": "text",
+            "text": (
+                "😕 No reconocí el modelo. "
+                "Puedes intentar con otra imagen o escribir /start."
             )
-        else:
-            reset_estado(cid)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
-                parse_mode="Markdown"
-            )
-        return
+        }
+
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
