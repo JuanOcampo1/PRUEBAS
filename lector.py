@@ -1313,12 +1313,12 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
-
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     import re
     import unicodedata
 
-    def norm(cad: str) -> str:
+    def norm(cad) -> str:
+        cad = str(cad)  # 🔧 Asegura que siempre sea string
         cad = unicodedata.normalize("NFKD", cad).encode("ascii", "ignore").decode("utf-8").upper()
         cad = re.sub(r"[-_/&]", " ", cad)
         cad = re.sub(r"\s+[X]\s+", " ", cad)
@@ -1326,7 +1326,7 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
         return cad
 
     texto_norm = norm(texto)
-    inventario = obtener_inventario()  # ← Asegúrate de que esta función exista en el mismo archivo o esté bien importada
+    inventario = obtener_inventario()  # ✅ Usa tu función actual para obtener inventario
 
     for carpeta in carpetas_drive:
         nombre = norm(carpeta)
@@ -1341,15 +1341,16 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
                     color = " ".join(color_tokens)
 
                     for item in inventario:
-                        if norm(item.get("modelo", "")) == modelo and norm(item.get("color", "")) == norm(color):
+                        if norm(item.get("modelo", "")) == norm(modelo) and norm(item.get("color", "")) == norm(color):
                             return {
-                                "modelo": modelo,
-                                "color": color.title(),
+                                "modelo": str(modelo),
+                                "color": str(color.title()),
                                 "marca": "DS",
                                 "precio": item.get("precio", 0)
                             }
 
     return None
+
 
 
 
