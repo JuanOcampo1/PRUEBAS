@@ -1313,43 +1313,43 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
-def detectar_modelo_color(texto: str, carpetas_drive: list) -> list:
+def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     """
     Detecta modelo y color comparando con nombres de carpetas Drive.
     Carpetas: DS_305_VERDE LIMON  → modelo: 305, color: VERDE LIMON
-    Devuelve lista de todas las coincidencias.
+    Coincidencia estricta: todos los tokens de color deben aparecer.
     """
     import re
     import unicodedata
 
     def norm(cad: str) -> str:
         cad = unicodedata.normalize("NFKD", cad).encode("ascii", "ignore").decode("utf-8").upper()
-        cad = re.sub(r"[-_/&]", " ", cad)          # guión, guion bajo, slash, ampersand
-        cad = re.sub(r"\s+[X]\s+", " ", cad)       # reemplaza " X " por espacio
+        cad = re.sub(r"[-_/&]", " ", cad)
+        cad = re.sub(r"\s+[X]\s+", " ", cad)
         cad = re.sub(r"\s+", " ", cad).strip()
         return cad
 
     texto_norm = norm(texto)
-    resultados = []
 
     for carpeta in carpetas_drive:
-        nombre = norm(carpeta)           # Ej: DS 305 VERDE LIMON
+        nombre = norm(carpeta)
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
-            modelo = partes[1]                           # 305
-            color_tokens = partes[2:]                    # ["VERDE", "LIMON"]
+            modelo = partes[1]
+            color_tokens = partes[2:]
 
             if f"DS {modelo}" in texto_norm or f"DS{modelo}" in texto_norm:
                 if all(re.search(rf"\b{re.escape(tok)}\b", texto_norm) for tok in color_tokens):
                     color = " ".join(color_tokens)
-                    resultados.append({
+                    return {
                         "modelo": modelo,
                         "color": color.title(),
                         "marca": "DS"
-                    })
+                    }
 
-    return resultados if resultados else None
+    return None
+
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2371,17 +2371,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["modelo"] = modelos[0]
             est["talla"] = m.group(1)
 
-        # 1️⃣ Referencia numérica (ej. 395)
+        # 1️⃣ Referencia numérica exacta (ej. 395)
         if not est.get("modelo") and (m := re.search(r"\b(\d{3})\b", texto)):
-            ref = m.group(1)
-            est["modelo"] = next((m for m in modelos if ref in m), None)
+                ref = m.group(1)
+                est["modelo"] = next(
+                    (m for m in modelos if re.search(rf"\b{ref}\b", normalize(m))),
+                    None
+                )
 
         # 2️⃣ Coincidencia textual
         if not est.get("modelo"):
-            for m in modelos:
-                if normalize(m) in texto_normalizado:
-                    est["modelo"] = m
-                    break
+                for m in modelos:
+                        if normalize(m) in texto_normalizado:
+                                est["modelo"] = m
+                                break
+
 
         # 3️⃣ Afirmación genérica (si solo hay 1 imagen)
         afirmaciones = {
@@ -2904,7 +2908,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "marca": p[0] if len(p) > 0 else "Desconocida",
                     "modelo": p[1] if len(p) > 1 else "Desconocido",
                     "color": p[2] if len(p) > 2 else "Desconocido",
-                    "fase": "imagen_detectada",
+                    "fase": "imagen_detectada"
                 })
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -2920,6 +2924,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -3173,68 +3178,110 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
         return
 
-    # 👟 Manejo unificado de talla escrita o confirmación (evita repeticiones)
+    # 👟 Manejo unificado de la fase esperando_talla
     if est.get("fase") == "esperando_talla":
+
+        # 🛑 Si ya se confirmó la talla antes, no volver a procesar
+        if est.get("talla_confirmada"):
+            return
 
         tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
         if isinstance(tallas_disponibles, (int, float, str)):
             tallas_disponibles = [str(tallas_disponibles)]
 
-        txt_norm = normalize(txt).lower()          # ⬅️ ahora todo en minúsculas
+        txt_norm   = normalize(txt).lower()
         entrada_num = re.findall(r"\d+\.?\d*", txt_norm)
 
-        # ✅ Confirmación posterior a talla pendiente
+        # ✅ Confirmación de talla pendiente
         if "talla_pendiente_confirmar" in est and any(
-                p in txt_norm for p in (
-                    "si", "sí", "s", "exacto", "eso", "dale",
-                    "claro", "confirmo", "correcto"
-                )):
+            p in txt_norm for p in ("si", "sí", "s", "exacto", "eso", "dale", "claro", "confirmo", "correcto")
+        ):
             est["talla"] = est.pop("talla_pendiente_confirmar")
             est["talla_confirmada"] = True
-            estado_usuario[cid] = est
-            return
-        # 🚀 Detección directa si cliente escribe talla
-        if entrada_num:
-            talla_escrita = entrada_num[0]
-            talla_convertida = extraer_cm_y_convertir_talla(txt)
 
-            if talla_convertida:
-                est["talla"] = str(talla_convertida)
+            # 🔍 Cargar datos del cliente si existe
+            cliente = obtener_datos_cliente(numero)
+            if cliente:
+                est.update({
+                    "nombre":    cliente.get("nombre",    "cliente"),
+                    "correo":    cliente.get("correo",    "No registrado"),
+                    "telefono":  cliente.get("telefono",  numero),
+                    "cedula":    cliente.get("cedula",    "No registrada"),
+                    "ciudad":    cliente.get("ciudad",    "No registrada"),
+                    "provincia": cliente.get("provincia", "No registrada"),
+                    "direccion": cliente.get("direccion", "No registrada")
+                })
+
+
+                # 🧾 Precio y resumen
+                precio = next(
+                    (i["precio"] for i in inv
+                     if normalize(i["marca"])  == normalize(est["marca"])
+                     and normalize(i["modelo"]) == normalize(est["modelo"])
+                     and normalize(i["color"])  == normalize(est["color"])),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else 0
+                est["sale_id"]      = generate_sale_id()
+                est["fase"]         = "confirmar_datos_guardados"
+                estado_usuario[cid] = est
+
+                resumen = (
+                    f"✅ Pedido: {est['sale_id']}\n"
+                    f"👤Nombre: {est['nombre']}\n"
+                    f"📧Correo: {est['correo']}\n"
+                    f"📱Celular: {est['telefono']}\n"
+                    f"🪪Cédula: {est['cedula']}\n"
+                    f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
+                )
+                await ctx.bot.send_message(cid, resumen, parse_mode="Markdown")
+                return
+
+            # ‼️ Sin datos previos → pedir nombre
+            est["fase"] = "esperando_nombre"
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(cid, "¿Tu nombre completo para el pedido?", parse_mode="Markdown")
+            return
+
+        # 🚀 Cliente escribe la talla directamente (cm, USA o COL)
+        if entrada_num:
+            talla_escrita   = entrada_num[0]
+            talla_convert   = extraer_cm_y_convertir_talla(txt)
+            if talla_convert:
+                est["talla"] = str(talla_convert)
                 est["talla_confirmada"] = True
                 estado_usuario[cid] = est
                 return {
                     "type": "text",
                     "text": (
-                        f"📏 Detecté que tu talla es *{talla_convertida}* en nuestra horma, "
-                        "basada en los centímetros que escribiste. ¿Seguimos con esa talla?"
+                        f"📏 Detecté que tu talla es *{talla_convert}* en nuestra horma. "
+                        "¿Seguimos con esa talla?"
                     ),
                     "parse_mode": "Markdown"
                 }
 
-            # 🚧 Si no se pudo convertir, pedir aclaración
+            # 🚧 No pude convertir → pedir aclaración
             if "cm" in txt_norm:
-                confirmacion = f"¿Te refieres a *{talla_escrita} cm*?"
+                confirm = f"¿Te refieres a *{talla_escrita} cm*?"
             elif "usa" in txt_norm or float(talla_escrita) <= 14:
-                confirmacion = f"¿Te refieres a *talla USA {talla_escrita}*?"
+                confirm = f"¿Te refieres a *talla USA {talla_escrita}*?"
             elif 35 <= int(float(talla_escrita)) <= 48:
-                confirmacion = f"¿Te refieres a *talla colombiana {talla_escrita}*?"
+                confirm = f"¿Te refieres a *talla colombiana {talla_escrita}*?"
             else:
-                confirmacion = (
-                    f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
-                )
+                confirm = f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
 
             est["talla_pendiente_confirmar"] = talla_escrita
             estado_usuario[cid] = est
+            return {"type": "text", "text": f"🧐 {confirm}", "parse_mode": "Markdown"}
 
-            return {
-                "type": "text",
-                "text": f"🧐 {confirmacion}"
-            }
-
-        # 🗨️ Cliente dice que no puede enviar la lengüeta
+        # 🗨️ Cliente no puede mandar lengüeta
         if any(p in txt_norm for p in (
-                "no tengo zapato", "no puedo", "no tengo", "no estoy en casa",
-                "sin lengüeta", "no tengo zapato a la mano")):
+            "no tengo zapato", "no puedo", "no tengo", "no estoy en casa",
+            "sin lengüeta", "no tengo zapato a la mano"
+        )):
             return {
                 "type": "text",
                 "text": (
@@ -3248,11 +3295,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "parse_mode": "Markdown"
             }
 
-        # ❌ No entendió ninguna talla ni rechazo, mostrar tallas
+        # ❌ No entendió → mostrar tallas disponibles
         tallas_str = "\n".join(f"- {t}" for t in tallas_disponibles)
         await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
+            cid,
+            (
                 "Estas son las tallas disponibles:\n"
                 f"{tallas_str}\n\n"
                 "Escríbeme la que más se te acerque o mándame una foto de la lengüeta si puedes 👟"
@@ -3260,101 +3307,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
-
-
-    # 👟 Elegir talla (texto directo o confirmación de lengüeta)
-    if est.get("fase") == "esperando_talla":
-
-        # 🛑 Si ya se confirmó la talla antes, evitar procesar este bloque de nuevo
-        if est.get("talla_confirmada"):
-            return
-
-        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-        if isinstance(tallas, (int, float, str)):
-            tallas = [str(tallas)]
-
-        # 🟢 1. Si ya hay una talla detectada (por imagen) y cliente confirma con "sí"
-        if est.get("talla") and any(p in txt for p in ("sí", "si", "s", "dale", "claro", "continuar", "comprar", "vamos")):
-            talla_detectada = est["talla"]
-
-        # 🟡 2. Si escribió la talla manualmente
-        else:
-            talla_detectada = detectar_talla(txt_raw, tallas)
-
-        if talla_detectada:
-            est["talla"] = talla_detectada
-
-            # 🔍 Ver si ya hay memoria del cliente
-            cliente = obtener_datos_cliente(numero)
-
-            if cliente:
-                nombre    = cliente.get("nombre", "cliente")
-                correo    = cliente.get("correo", "No registrado")
-                telefono  = cliente.get("telefono", numero)
-                cedula    = cliente.get("cedula", "No registrada")
-                ciudad    = cliente.get("ciudad", "No registrada")
-                provincia = cliente.get("provincia", "No registrada")
-                direccion = cliente.get("direccion", "No registrada")
-
-                est.update({
-                    "nombre": nombre,
-                    "correo": correo,
-                    "telefono": telefono,
-                    "cedula": cedula,
-                    "ciudad": ciudad,
-                    "provincia": provincia,
-                    "direccion": direccion
-                })
-
-                precio = next(
-                    (i["precio"] for i in inv
-                     if normalize(i["marca"]) == normalize(est["marca"])
-                     and normalize(i["modelo"]) == normalize(est["modelo"])
-                     and normalize(i["color"]) == normalize(est["color"])),
-                    None
-                )
-                est["precio_total"] = int(precio) if precio else 0
-                est["sale_id"] = generate_sale_id()
-
-                resumen = (
-                    f"✅ Pedido: {est['sale_id']}\n"
-                    f"👤Nombre: {nombre}\n"
-                    f"📧Correo: {correo}\n"
-                    f"📱Celular: {telefono}\n"
-                    f"🪪Cédula: {cedula}\n"
-                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
-                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
-                )
-
-                est["fase"] = "confirmar_datos_guardados"
-                estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
-                return
-
-            # 🧾 No hay cliente guardado → continuar normal
-            est["fase"] = "esperando_nombre"
-            estado_usuario[cid] = est
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Tu nombre completo para el pedido?",
-                parse_mode="Markdown"
-            )
-            return
-
-        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
-            ),
-            parse_mode="Markdown"
-        )
-        return
-
 
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
