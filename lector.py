@@ -2860,22 +2860,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "marca": resultado.get("marca", "DS"),
                     "modelo": resultado.get("modelo", "???"),
                     "color": resultado.get("color", "Desconocido"),
-                    "precio_total": item["precio"],
+                    "precio_total": item.get("precio", 0),
                     "fase": "esperando_talla"
                 })
                 estado_usuario[cid] = est
-                os.remove(tmp)
 
-                marca = resultado.get("marca", "DS")
-                modelo = resultado.get("modelo", "???")
+                marca = est.get("marca", "DS")
+                modelo = est.get("modelo", "???")
+                color = est.get("color", "Desconocido")
+                precio = est.get("precio_total", 0)
                 nombre_bonito = f"{marca} {modelo}"
-                precio = item["precio"]
 
                 try:
                     await ctx.bot.send_message(
                         chat_id=cid,
                         text=(
-                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{color}* están brutales 😎.\n"
                             f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
                             f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                             f"¿Seguimos con la compra?"
@@ -2884,6 +2884,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception as e:
                     logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
+                        parse_mode="Markdown"
+                    )
+                os.remove(tmp)
                 return
 
             # ⚠️ Modelo/color detectados, pero no disponibles en inventario
@@ -2929,6 +2935,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
+
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -3277,7 +3284,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 🛑 Si ya se confirmó la talla antes, evitar procesar este bloque de nuevo
         if est.get("talla_confirmada"):
-            return await continuar_flujo_post_talla(ctx, cid, est, inv, numero)
+            return
 
         tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
         if isinstance(tallas, (int, float, str)):
