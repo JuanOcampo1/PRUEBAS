@@ -193,7 +193,7 @@ FAQ_ALIAS = {
     ]
 }
 
-def detectar_match_faq(texto_usuario: str, diccionario_faqs: dict, umbral: int = 75) -> str:
+def detectar_match_faq(texto_usuario: str, diccionario_faqs: dict, umbral: int = 90) -> str:
     """
     Detecta si el texto del usuario coincide con alguna clave de FAQ, 
     aunque esté mal escrito. Usa RapidFuzz para encontrar coincidencias difusas.
