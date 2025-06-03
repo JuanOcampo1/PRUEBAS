@@ -1314,13 +1314,7 @@ def listar_carpetas_drive():
 
     return carpetas
 
-
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
-    """
-    Detecta modelo y color comparando con nombres de carpetas Drive.
-    Carpetas: DS_305_VERDE LIMON  → modelo: 305, color: VERDE LIMON
-    Coincidencia estricta: todos los tokens de color deben aparecer.
-    """
     import re
     import unicodedata
 
@@ -1351,6 +1345,7 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
                     }
 
     return None
+
 
 
 
@@ -2843,14 +2838,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
+        print("📄 Texto OCR extraído:", texto_ocr)
+        logging.debug(f"📄 Texto OCR extraído: {texto_ocr}")
 
         # ✅ Buscar modelo/color en carpetas Drive
         carpetas_en_drive = listar_carpetas_drive()
         resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
-        if resultado:   # ← aquí la corrección
+        print("🎯 Resultado detectar_modelo_color:", resultado)
+        logging.debug(f"🎯 Resultado detectar_modelo_color: {resultado}")
+
+        if resultado:
             modelo_solo     = normalize(resultado["modelo"])
             color_detectado = normalize(resultado["color"])
+            print(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
+            logging.debug(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
 
             item = next(
                 (i for i in inv
@@ -2858,6 +2860,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                  and normalize(i["color"])  == color_detectado),
                 None
             )
+
+            print("📦 Item encontrado:", item)
+            logging.debug(f"📦 Item encontrado: {item}")
 
             if item:
                 est.update({
@@ -2899,6 +2904,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.remove(tmp)
 
         mensaje = await identificar_modelo_desde_imagen(base64_img)
+        logging.debug(f"📸 Resultado CLIP: {mensaje}")
 
         if "coincide con *" in mensaje.lower():
             modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
@@ -2924,8 +2930,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
-
-
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
