@@ -2876,7 +2876,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "modelo":       resultado["modelo"],
                     "color":        resultado["color"],
                     "precio_total": item["precio"],
-                    "fase":         "esperando_talla"
+                    "fase":         "imagen_detectada"  # ✅ corregido aquí
                 })
                 estado_usuario[cid] = est
 
@@ -2894,6 +2894,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     ),
                     "parse_mode": "Markdown"
                 }
+
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia válida
         with open(tmp, "rb") as f_img:
@@ -4287,7 +4288,6 @@ async def manejar_precio(update, ctx, inventario):
     txt = normalize(mensaje)
     logging.debug(f"[manejar_precio] Mensaje recibido: {mensaje}")
 
-    # ✅ PROTECCIÓN — Solo ejecutarse si no está en fases de video
     est = estado_usuario.get(cid, {})
     fase_actual = est.get("fase", "")
 
@@ -4299,7 +4299,6 @@ async def manejar_precio(update, ctx, inventario):
         logging.info(f"[manejar_precio] Ignorado: usuario en fase '{fase_actual}'")
         return False
 
-    # Detectar referencia de 3 o 4 dígitos
     m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
     if not m_ref:
         logging.debug("[manejar_precio] No se detectó referencia en el mensaje.")
@@ -4308,76 +4307,13 @@ async def manejar_precio(update, ctx, inventario):
     referencia = m_ref.group(1)
     logging.debug(f"[manejar_precio] Referencia detectada: {referencia}")
 
-    # Buscar productos que coincidan
     productos = [
         item for item in inventario
         if referencia in normalize(item.get("modelo", "")) and disponible(item)
     ]
     logging.debug(f"[manejar_precio] Productos encontrados con stock: {len(productos)}")
 
-    if productos:
-        from collections import defaultdict
-        agrupados = defaultdict(set)
-
-        for item in productos:
-            try:
-                precio_raw = str(item.get("precio", "0")).replace(".", "").replace("COP", "").strip()
-                precio_formateado = f"{int(precio_raw):,}COP"
-            except Exception as e:
-                logging.error(f"[manejar_precio] Error formateando precio: {e}")
-                precio_formateado = "No disponible"
-
-            try:
-                key = (
-                    item.get("modelo", "desconocido"),
-                    item.get("color", "varios colores"),
-                    precio_formateado
-                )
-                agrupados[key].add(str(item.get("talla", "")))
-            except Exception as e:
-                logging.error(f"[manejar_precio] Error agrupando tallas: {e}")
-        
-        respuesta_final = ""
-        primer_producto = productos[0]
-
-        for (modelo, color, precio), tallas in agrupados.items():
-            try:
-                if not isinstance(tallas, (set, list, tuple)):
-                    tallas = [str(tallas)]
-
-                tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
-                tallas_str = ", ".join(tallas_ordenadas)
-
-                respuesta_final += (
-                    f"👟 *{modelo}* ({color})\n"
-                    f"💲 Precio: *{precio}*\n"
-                    f"Tallas disponibles: {tallas_str}\n\n"
-                )
-            except Exception as e:
-                logging.error(f"[manejar_precio] Error formateando tallas: {e}")
-
-        # ✅ Guardar estado de forma segura
-        est["fase"] = "confirmar_compra"
-        est["modelo_confirmado"] = primer_producto["modelo"]
-        est["color_confirmado"] = primer_producto["color"]
-        est["marca"] = primer_producto.get("marca", "sin marca")
-        estado_usuario[cid] = est
-
-        logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                f"{respuesta_final}"
-                "¿Seguimos con la compra?\n\n"
-            ),
-            parse_mode="Markdown"
-        )
-        return True
-
-    else:
-        logging.debug("[manejar_precio] No se encontraron productos con esa referencia.")
+    if not productos:
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
@@ -4388,6 +4324,57 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
+
+    from collections import defaultdict
+
+    agrupados_adulto = defaultdict(set)
+    agrupados_kids = defaultdict(set)
+
+    for item in productos:
+        modelo = item.get("modelo", "desconocido")
+        color = item.get("color", "varios colores")
+        precio = item.get("precio", 0)
+        precio_raw = str(precio).replace(".", "").replace("COP", "").strip()
+        precio_formateado = f"{int(precio_raw):,}COP"
+
+        grupo = agrupados_kids if "KIDS" in modelo.upper() else agrupados_adulto
+        grupo[precio_formateado].add(color.upper())
+
+    def formatear_respuesta(grupo, titulo):
+        if not grupo:
+            return ""
+
+        respuesta = f"👟 *{titulo}*\n"
+        for precio, colores in grupo.items():
+            colores_str = ", ".join(sorted(colores))
+            respuesta += (
+                f"🎨 *Colores:* {colores_str}\n"
+                f"💲 *Precio:* {precio}\n\n"
+            )
+        return respuesta
+
+    respuesta_final = ""
+    respuesta_final += formatear_respuesta(agrupados_adulto, f"Referencia {referencia} - Adulto")
+    respuesta_final += formatear_respuesta(agrupados_kids, f"Referencia {referencia} - KIDS")
+
+    primer_producto = productos[0]
+    est["fase"] = "confirmar_compra"
+    est["modelo_confirmado"] = primer_producto["modelo"]
+    est["color_confirmado"] = primer_producto["color"]
+    est["marca"] = primer_producto.get("marca", "sin marca")
+    estado_usuario[cid] = est
+
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text=(
+            f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+            f"{respuesta_final}"
+            "¿Seguimos con la compra?"
+        ),
+        parse_mode="Markdown"
+    )
+    return True
+
    
 # --------------------------------------------------------------------
 
@@ -5588,7 +5575,7 @@ async def venom_webhook(req: Request):
                     print("📄 Texto OCR extraído:", texto_ocr)
                     logging.debug(f"📄 Texto OCR extraído: {texto_ocr}")
 
-                    # ✅ Cargar carpetas desde Drive antes de intentar OCR
+                    # ✅ Buscar modelo/color en carpetas Drive
                     carpetas_en_drive = listar_carpetas_drive()
                     respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
                     print("🎯 Resultado detectar_modelo_color:", respuesta_ocr)
@@ -5599,7 +5586,7 @@ async def venom_webhook(req: Request):
                             "modelo": respuesta_ocr["modelo"],
                             "color": respuesta_ocr["color"],
                             "marca": respuesta_ocr["marca"],
-                            "fase": "esperando_talla"
+                            "fase": "imagen_detectada"  # ✅ Corrección aquí
                         })
                         estado_usuario[cid] = est
 
@@ -5682,7 +5669,7 @@ async def venom_webhook(req: Request):
                         )
                         precio_str = f"{int(precio):,} COP" if precio else "No disponible"
 
-                        return JSONResponse({
+                        return {
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
@@ -5691,23 +5678,23 @@ async def venom_webhook(req: Request):
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
-                        })
+                        }
                     else:
                         reset_estado(cid)
-                        return JSONResponse({
+                        return {
                             "type": "text",
                             "text": (
                                 "❌ No logré identificar bien el modelo de la imagen.\n"
                                 "¿Podrías enviarme otra foto un poco más clara?"
                             )
-                        })
+                        }
 
                 except Exception:
                     logging.exception("[CLIP] Error en identificación:")
-                    return JSONResponse({
+                    return {
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
-                    })
+                    }
 
         # 💬 TEXTO
         elif mtype == "chat":
