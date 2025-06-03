@@ -4619,23 +4619,20 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     guardar_memoria_usuario(cid, "nombre", nombre_detectado)
                     logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_match}")
 
-                    if 'ctx' in locals():
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text=(
-                                f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_match} el 🚚 envío es completamente gratis, "
-                                "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
-                            )
+                    return {
+                        "type": "text",
+                        "text": (
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_match} el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
-                    return
+                    }
+
                 else:
                     logging.warning(f"❌ Ciudad detectada pero no válida: {ciudad_detectada}")
-                    if 'ctx' in locals():
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text="😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
-                        )
-                    return
+                    return {
+                        "type": "text",
+                        "text": "😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                    }
 
             # 👤 Si no detectó ciudad, intentar detectar solo el nombre
             if not memoria.get("nombre"):
@@ -4653,15 +4650,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
 
                     ciudad = memoria.get("ciudad", "tu ciudad")
-                    if 'ctx' in locals():
-                        await ctx.bot.send_message(
-                            chat_id=cid,
-                            text=(
-                                f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
-                                "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
-                            )
+                    return {
+                        "type": "text",
+                        "text": (
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
-                    return
+                    }
+
     except Exception as e:
         logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
 
