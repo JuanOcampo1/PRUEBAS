@@ -77,9 +77,11 @@ def normalizar(texto: str) -> str:
     texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.upper().strip()
 
+import os
 from openai import OpenAI
 
-client = OpenAI(api_key=OPENAI_API_KEY)  # O usa os.getenv("OPENAI_API_KEY")
+# Usa variable de entorno segura desde Render
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def detectar_nombre_ia_4mini(texto: str) -> str:
     """
