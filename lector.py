@@ -5585,23 +5585,40 @@ async def venom_webhook(req: Request):
                         f.write(img_bytes)
 
                     texto_ocr = extraer_texto_comprobante(path_img)
+                    print("📄 Texto OCR extraído:", texto_ocr)
+                    logging.debug(f"📄 Texto OCR extraído: {texto_ocr}")
 
                     # ✅ Cargar carpetas desde Drive antes de intentar OCR
                     carpetas_en_drive = listar_carpetas_drive()
                     respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+                    print("🎯 Resultado detectar_modelo_color:", respuesta_ocr)
+                    logging.debug(f"🎯 Resultado detectar_modelo_color: {respuesta_ocr}")
 
                     if respuesta_ocr:
                         est.update({
                             "modelo": respuesta_ocr["modelo"],
                             "color": respuesta_ocr["color"],
                             "marca": respuesta_ocr["marca"],
-                            "fase": "imagen_detectada"
+                            "fase": "esperando_talla"
                         })
                         estado_usuario[cid] = est
 
                         os.remove(path_img)  # 🔥 Limpieza de imagen temporal
 
-                        return JSONResponse(respuesta_ocr)
+                        nombre_bonito = f"{respuesta_ocr['marca']} {respuesta_ocr['modelo']}"
+                        precio        = respuesta_ocr["precio"]
+                        color         = respuesta_ocr["color"]
+
+                        return {
+                            "type": "text",
+                            "text": (
+                                f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{color}* están brutales 😎.\n"
+                                f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                "¿Seguimos con la compra?"
+                            ),
+                            "parse_mode": "Markdown"
+                        }
 
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
