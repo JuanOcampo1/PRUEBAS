@@ -1313,10 +1313,10 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
+
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
     import re
     import unicodedata
-    from mi_modulo_inventario import obtener_inventario  # Cambia esto por tu import real si es necesario
 
     def norm(cad: str) -> str:
         cad = unicodedata.normalize("NFKD", cad).encode("ascii", "ignore").decode("utf-8").upper()
@@ -1326,7 +1326,7 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
         return cad
 
     texto_norm = norm(texto)
-    inventario = obtener_inventario()  # ⬅️ Invocamos inventario aquí
+    inventario = obtener_inventario()  # ← Asegúrate de que esta función exista en el mismo archivo o esté bien importada
 
     for carpeta in carpetas_drive:
         nombre = norm(carpeta)
@@ -1340,14 +1340,13 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
                 if all(re.search(rf"\b{re.escape(tok)}\b", texto_norm) for tok in color_tokens):
                     color = " ".join(color_tokens)
 
-                    # 🔍 Buscar en inventario
                     for item in inventario:
                         if norm(item.get("modelo", "")) == modelo and norm(item.get("color", "")) == norm(color):
                             return {
                                 "modelo": modelo,
                                 "color": color.title(),
                                 "marca": "DS",
-                                "precio": item.get("precio", 0)  # ← añade el precio
+                                "precio": item.get("precio", 0)
                             }
 
     return None
@@ -2855,38 +2854,54 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         logging.debug(f"🎯 Resultado detectar_modelo_color: {resultado}")
 
         if resultado:
-            est.update({
-                "marca":        resultado["marca"],
-                "modelo":       resultado["modelo"],
-                "color":        resultado["color"],
-                "precio_total": resultado.get("precio", 0),
-                "fase":         "esperando_talla"
-            })
-            estado_usuario[cid] = est
+            modelo_solo     = normalize(resultado["modelo"])
+            color_detectado = normalize(resultado["color"])
+            print(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
+            logging.debug(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
 
-            nombre_bonito = f"{est['marca']} {est['modelo']}"
-            precio        = est["precio_total"]
+            item = next(
+                (i for i in inv
+                 if normalize(i["modelo"]) == modelo_solo
+                 and normalize(i["color"])  == color_detectado),
+                None
+            )
 
-            try:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{est['color']}* están brutales 😎.\n"
-                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"¿Seguimos con la compra?"
-                    ),
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
-                    parse_mode="Markdown"
-                )
-            os.remove(tmp)
-            return  # ✅ OCR exitoso, no pasar a CLIP
+            print("📦 Item encontrado:", item)
+            logging.debug(f"📦 Item encontrado: {item}")
+
+            if item:
+                est.update({
+                    "marca":        resultado["marca"],
+                    "modelo":       resultado["modelo"],
+                    "color":        resultado["color"],
+                    "precio_total": item["precio"],
+                    "fase":         "esperando_talla"
+                })
+                estado_usuario[cid] = est
+
+                nombre_bonito = f"{est['marca']} {est['modelo']}"
+                precio        = est["precio_total"]
+
+                try:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{est['color']}* están brutales 😎.\n"
+                            f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                            f"¿Seguimos con la compra?"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
+                        parse_mode="Markdown"
+                    )
+                os.remove(tmp)
+                return  # ✅ OCR exitoso, no pasar a CLIP
 
         # 2️⃣ CLIP si OCR falló o no hubo coincidencia válida
         with open(tmp, "rb") as f_img:
@@ -2920,7 +2935,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
-
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
