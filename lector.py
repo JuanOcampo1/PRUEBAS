@@ -4589,40 +4589,41 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # 📍 Detección libre de nombre y ciudad (solo si aún no están ambos guardados y ya se envió el welcome)
     try:
         if not (memoria.get("nombre") and memoria.get("ciudad")) and est.get("welcome_enviado"):
-            texto_limpio = texto.strip().lower()
+            logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto}'")
 
-            # 🧹 Limpiezas básicas
+            texto_limpio = texto.strip().lower()
             texto_limpio = texto_limpio.replace(" y soy ", " ")
             texto_limpio = texto_limpio.replace("soy soy", "soy")
             texto_limpio = texto_limpio.replace("me llamo soy", "me llamo")
 
-            logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto_limpio}'")
-
-            # 🔄 Detección combinada de nombre + ciudad
             match_dual = re.search(
-                r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                r"(?:soy|me llamo)?\s*([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
                 texto_limpio
             )
 
             if match_dual:
                 nombre_detectado = match_dual.group(1).strip().title()
                 ciudad_detectada = match_dual.group(2).strip().title()
+                logging.info(f"🔎 Regex encontró: nombre={nombre_detectado}, ciudad={ciudad_detectada}")
 
-                logging.info(f"🔍 Detección dual: nombre={nombre_detectado}, ciudad={ciudad_detectada}")
+                ciudad_match = next(
+                    (c for c in CIUDADES_DISPONIBLES if normalize(ciudad_detectada) == normalize(c)),
+                    None
+                )
 
-                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                if ciudad_match:
                     memoria["nombre"] = nombre_detectado
-                    memoria["ciudad"] = ciudad_detectada
-                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                    memoria["ciudad"] = ciudad_match
+                    guardar_memoria_ciudad_temporal(cid, ciudad_match)
+                    guardar_memoria_usuario(cid, "ciudad", ciudad_match)
                     guardar_memoria_usuario(cid, "nombre", nombre_detectado)
-                    logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_detectada}")
+                    logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_match}")
 
                     if 'ctx' in locals():
                         await ctx.bot.send_message(
                             chat_id=cid,
                             text=(
-                                f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
+                                f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_match} el 🚚 envío es completamente gratis, "
                                 "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                             )
                         )
@@ -4638,14 +4639,11 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
             # 👤 Si no detectó ciudad, intentar detectar solo el nombre
             if not memoria.get("nombre"):
-                nombre_detectado = None
-
                 match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
                 if match_nombre:
                     nombre_detectado = match_nombre.group(1).strip().title()
                     logging.info(f"📛 Nombre detectado con regex: {nombre_detectado}")
-
-                if not nombre_detectado:
+                else:
                     nombre_detectado = await detectar_nombre_ia_4mini(texto)
                     logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
 
@@ -4664,11 +4662,9 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                             )
                         )
                     return
-
-            logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
-
     except Exception as e:
         logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
+
 
 
     # ─── FILTRO 1: mensaje vacío ───
