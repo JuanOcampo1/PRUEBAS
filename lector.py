@@ -1313,18 +1313,16 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
-
-def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
+def detectar_modelo_color(texto: str, carpetas_drive: list) -> list:
     """
     Detecta modelo y color comparando con nombres de carpetas Drive.
     Carpetas: DS_305_VERDE LIMON  → modelo: 305, color: VERDE LIMON
-    Coincidencia estricta: todos los tokens de color deben aparecer.
+    Devuelve lista de todas las coincidencias.
     """
     import re
     import unicodedata
 
     def norm(cad: str) -> str:
-        # quita tildes, mayúsculas, reemplaza separadores por espacio único
         cad = unicodedata.normalize("NFKD", cad).encode("ascii", "ignore").decode("utf-8").upper()
         cad = re.sub(r"[-_/&]", " ", cad)          # guión, guion bajo, slash, ampersand
         cad = re.sub(r"\s+[X]\s+", " ", cad)       # reemplaza " X " por espacio
@@ -1332,28 +1330,26 @@ def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
         return cad
 
     texto_norm = norm(texto)
+    resultados = []
 
     for carpeta in carpetas_drive:
         nombre = norm(carpeta)           # Ej: DS 305 VERDE LIMON
         partes = nombre.split()
 
-        # Asegúrate de formato DS <modelo> <color...>
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]                           # 305
             color_tokens = partes[2:]                    # ["VERDE", "LIMON"]
 
-            # 1️⃣ Modelo debe aparecer exacto (DS 305 o DS305)
             if f"DS {modelo}" in texto_norm or f"DS{modelo}" in texto_norm:
-                # 2️⃣ Cada token de color debe existir como palabra completa
                 if all(re.search(rf"\b{re.escape(tok)}\b", texto_norm) for tok in color_tokens):
                     color = " ".join(color_tokens)
-                    return {
+                    resultados.append({
                         "modelo": modelo,
                         "color": color.title(),
                         "marca": "DS"
-                    }
+                    })
 
-    return None
+    return resultados if resultados else None
 
 
 def extraer_texto_comprobante(path: str) -> str:
@@ -2844,67 +2840,56 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ✅ Cargar carpetas desde Drive (para validación directa)
         carpetas_en_drive = listar_carpetas_drive()
-        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+        resultados = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
-        if resultado:
-            modelo_solo = normalize(resultado.get("modelo", ""))
-            color_detectado = normalize(resultado.get("color", ""))
+        if resultados and isinstance(resultados, list):
+            for resultado in resultados:
+                modelo_solo = normalize(resultado.get("modelo", ""))
+                color_detectado = normalize(resultado.get("color", ""))
 
-            item = next(
-                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
-                None
-            )
+                item = next(
+                    (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
+                    None
+                )
 
-            if item:
-                est.update({
-                    "marca": resultado.get("marca", "DS"),
-                    "modelo": resultado.get("modelo", "???"),
-                    "color": resultado.get("color", "Desconocido"),
-                    "precio_total": item.get("precio", 0),
-                    "fase": "esperando_talla"
-                })
-                estado_usuario[cid] = est
+                if item:
+                    est.update({
+                        "marca": resultado.get("marca", "DS"),
+                        "modelo": resultado.get("modelo", "???"),
+                        "color": resultado.get("color", "Desconocido"),
+                        "precio_total": item.get("precio", 0),
+                        "fase": "esperando_talla"
+                    })
+                    estado_usuario[cid] = est
 
-                marca = est.get("marca", "DS")
-                modelo = est.get("modelo", "???")
-                color = est.get("color", "Desconocido")
-                precio = est.get("precio_total", 0)
-                nombre_bonito = f"{marca} {modelo}"
+                    marca = est["marca"]
+                    modelo = est["modelo"]
+                    color = est["color"]
+                    precio = est["precio_total"]
+                    nombre_bonito = f"{marca} {modelo}"
 
-                try:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{color}* están brutales 😎.\n"
-                            f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
-                            f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                            f"¿Seguimos con la compra?"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
-                        parse_mode="Markdown"
-                    )
-                os.remove(tmp)
-                return
+                    try:
+                        await ctx.bot.send_message(
+                            chat_id=cid,
+                            text=(
+                                f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{color}* están brutales 😎.\n"
+                                f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"¿Seguimos con la compra?"
+                            ),
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logging.error(f"❌ Error enviando mensaje de producto detectado: {e}")
+                        await ctx.bot.send_message(
+                            chat_id=cid,
+                            text="✅ Producto detectado, pero no pude mostrar el mensaje completo. ¿Seguimos con la compra?",
+                            parse_mode="Markdown"
+                        )
+                    os.remove(tmp)
+                    return  # ✅ OCR exitoso, no seguir a CLIP
 
-            # ⚠️ Modelo/color detectados, pero no disponibles en inventario
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🧐 Detecté el modelo y color, pero no está disponible en este momento.\n"
-                    "Puedes enviarme otra imagen o elegir otro modelo si deseas."
-                ),
-                parse_mode="Markdown"
-            )
-            os.remove(tmp)
-            return  # ❗ IMPORTANTE: no pasar a CLIP si ya hubo resultado OCR
-
-        # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
+        # 2️⃣ CLIP si OCR falló o no hubo coincidencia válida
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
@@ -2935,7 +2920,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         return
-
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
@@ -3208,8 +3192,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["talla"] = est.pop("talla_pendiente_confirmar")
             est["talla_confirmada"] = True
             estado_usuario[cid] = est
-            return await continuar_flujo_post_talla(ctx, cid, est, inv, numero)
-
+            return
         # 🚀 Detección directa si cliente escribe talla
         if entrada_num:
             talla_escrita = entrada_num[0]
