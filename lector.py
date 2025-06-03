@@ -78,14 +78,13 @@ def normalizar(texto: str) -> str:
     return texto.upper().strip()
 
 import os
-from openai import OpenAI
+from openai import AsyncOpenAI
 
-# Usa variable de entorno segura desde Render
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def detectar_nombre_ia_4mini(texto: str) -> str:
+async def detectar_nombre_ia_4mini(texto: str) -> str | None:
     """
-    Usa GPT-4.0 mini (económico) para detectar el nombre de la persona desde un mensaje.
+    Usa GPT-4o para detectar el nombre de la persona desde un mensaje.
     """
     prompt = f"""
 Solo responde con el nombre de la persona mencionado en este mensaje. No incluyas apellidos, ciudades ni palabras extras.
@@ -95,18 +94,18 @@ Nombre:
 """
 
     try:
-        respuesta = client.chat.completions.create(
+        respuesta = await client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10
         )
-        nombre = respuesta.choices[0].message.content.strip()
-        return nombre
+        return respuesta.choices[0].message.content.strip()
 
     except Exception as e:
         print(f"❌ Error en detectar_nombre_ia_4mini: {e}")
         return None
+
 
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
