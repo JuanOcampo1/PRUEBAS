@@ -4596,6 +4596,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             texto_limpio = texto_limpio.replace("soy soy", "soy")
             texto_limpio = texto_limpio.replace("me llamo soy", "me llamo")
 
+            logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto_limpio}'")
+
             # 🔄 Detección combinada de nombre + ciudad
             match_dual = re.search(
                 r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
@@ -4605,6 +4607,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             if match_dual:
                 nombre_detectado = match_dual.group(1).strip().title()
                 ciudad_detectada = match_dual.group(2).strip().title()
+
+                logging.info(f"🔍 Detección dual: nombre={nombre_detectado}, ciudad={ciudad_detectada}")
 
                 if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
                     memoria["nombre"] = nombre_detectado
@@ -4660,6 +4664,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                             )
                         )
                     return
+
+            logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
     except Exception as e:
         logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
