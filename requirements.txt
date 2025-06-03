@@ -28,3 +28,4 @@ pydub
 ffmpeg-python
 pillow
 numpy==1.26.4
+rapidfuzz==3.6.1
