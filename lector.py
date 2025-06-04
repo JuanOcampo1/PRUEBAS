@@ -4603,6 +4603,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             texto_limpio = texto_limpio.replace("soy soy", "soy")
             texto_limpio = texto_limpio.replace("me llamo soy", "me llamo")
 
+            # --- Regex para nombre + ciudad ---
             match_dual = re.search(
                 r"(?:soy|me llamo)?\s*([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
                 texto_limpio
@@ -4613,10 +4614,32 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ciudad_detectada = match_dual.group(2).strip().title()
                 logging.info(f"🔎 Regex encontró: nombre={nombre_detectado}, ciudad={ciudad_detectada}")
 
-                ciudad_match = next(
-                    (c for c in CIUDADES_DISPONIBLES if normalize(ciudad_detectada) == normalize(c)),
-                    None
-                )
+                # --- Coincidencia con alias o similar ---
+                ciudad_normalizada = normalize(ciudad_detectada)
+                ALIAS_CIUDADES = {
+                    "cartagena": "Cartagena de Indias",
+                    "bogota": "Bogotá",
+                    "medellin": "Medellín",
+                    "cali": "Cali",
+                    "barranquilla": "Barranquilla",
+                    "cartagena de indias": "Cartagena de Indias"
+                }
+
+                def encontrar_ciudad_similar(ciudad_input, ciudades_validas, umbral=0.85):
+                    import difflib
+                    ciudad_input = normalize(ciudad_input)
+                    coincidencias = [
+                        (ciudad, difflib.SequenceMatcher(None, normalize(ciudad), ciudad_input).ratio())
+                        for ciudad in ciudades_validas
+                    ]
+                    coincidencias.sort(key=lambda x: x[1], reverse=True)
+                    if coincidencias and coincidencias[0][1] >= umbral:
+                        return coincidencias[0][0]
+                    return None
+
+                ciudad_match = ALIAS_CIUDADES.get(ciudad_normalizada)
+                if not ciudad_match:
+                    ciudad_match = encontrar_ciudad_similar(ciudad_detectada, CIUDADES_DISPONIBLES, umbral=0.7)
 
                 if ciudad_match:
                     memoria["nombre"] = nombre_detectado
@@ -4635,13 +4658,19 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     }
 
                 else:
+                    # Ciudad inválida, pero nombre sí está bien
+                    memoria["nombre"] = nombre_detectado
+                    guardar_memoria_usuario(cid, "nombre", nombre_detectado)
                     logging.warning(f"❌ Ciudad detectada pero no válida: {ciudad_detectada}")
                     return {
                         "type": "text",
-                        "text": "😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                        "text": (
+                            f"🤩 Genial, {nombre_detectado}. Recuerda que para tu ciudad el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        )
                     }
 
-            # 👤 Si no detectó ciudad, intentar detectar solo el nombre
+            # 👤 Solo nombre
             if not memoria.get("nombre"):
                 match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
                 if match_nombre:
@@ -4651,19 +4680,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     nombre_detectado = await detectar_nombre_ia_4mini(texto)
                     logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
 
-                if nombre_detectado:
+                if nombre_detectado and len(nombre_detectado.split()) == 1 and len(nombre_detectado) <= 15 and "no puedo" not in nombre_detectado.lower():
                     memoria["nombre"] = nombre_detectado
                     guardar_memoria_usuario(cid, "nombre", nombre_detectado)
                     logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
 
-                    ciudad = memoria.get("ciudad", "tu ciudad")
+                    ciudad_actual = memoria.get("ciudad", "")
+                    ciudad_valida = ciudad_actual if ciudad_actual else "tu ciudad"
                     return {
                         "type": "text",
                         "text": (
-                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
+                            f"🤩 Genial, {nombre_detectado}. Recuerda que para {ciudad_valida} el 🚚 envío es completamente gratis, "
                             "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
                     }
+                else:
+                    logging.warning(f"❌ Nombre inválido o no detectado correctamente: {nombre_detectado}")
 
     except Exception as e:
         logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
