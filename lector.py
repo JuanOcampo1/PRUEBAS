@@ -180,7 +180,7 @@ FAQ_ALIAS = {
         "descuento si compro dos", "hay descuento por dos", "promocion dos pares"
     ],
     "mayoristas": [
-        "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
+        "mayorista", "mayoristas", "mayorista", "quiero vender",
         "puedo venderlos", "descuento para revender", "revender", "mayoreo", "venta al por mayor"
     ],
     "tallas_normales": [
@@ -267,6 +267,13 @@ def cargar_memoria_usuario(cid: str) -> dict:
         except Exception as e:
             logging.warning(f"⚠️ Error leyendo memoria de usuario: {e}")
     return {}
+def cargar_memoria_ciudad_temporal(cid):
+    """
+    Devuelve la ciudad temporal desde la memoria RAM del bot (estado_usuario), si existe.
+    """
+    if cid in estado_usuario:
+        return estado_usuario[cid].get("ciudad")
+    return None
 
 # 🧠 Guardar clave/valor en memoria persistente
 def guardar_memoria_usuario(cid: str, key: str, valor: str):
@@ -5228,11 +5235,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    ADMIN_CID = "573137842559"  # Tu número de prueba
+    ADMIN_CID = ["573137842559", "573246666630"]
+
     is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
     # 1️⃣ COMANDO /start solo para admin (resetea todo)
-    if texto.strip() == "/start" and cid == ADMIN_CID:
+    if texto.strip() == "/start" and cid in ADMIN_CID:
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
@@ -5245,6 +5253,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "type": "text",
             "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
         }
+
 
     # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
     if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
