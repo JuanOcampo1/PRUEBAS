@@ -5152,7 +5152,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         fila = est.get("devolucion_fila")
 
         if est["fase"] == "esperando_motivo_devolucion":
-            actualizar_celda_devol(fila, "Motivo", texto.strip())  # ✅ corregido aquí
+            actualizar_celda_devol(fila, "Motivo", texto.strip())
             est["fase"] = "esperando_opcion_cambio"
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -5165,9 +5165,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             )
             return
 
-
         elif est["fase"] == "esperando_opcion_cambio":
-            t = normalize(txt_raw)
+            t = normalize(texto)
 
             if "mismo" in t:
                 actualizar_celda_devol(fila, "ProductoNuevo", "Reemplazo del mismo producto")
@@ -5190,7 +5189,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 return
 
         elif est["fase"] == "esperando_producto_nuevo":
-            actualizar_celda_devol(fila, "ProductoNuevo", txt_raw.strip())
+            actualizar_celda_devol(fila, "ProductoNuevo", texto.strip())
             est["fase"] = "postventa_instrucciones"
 
         if est["fase"] == "postventa_instrucciones":
@@ -5212,6 +5211,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             )
             reset_estado(cid)
             return
+
 
 
     texto = texto.lower()
