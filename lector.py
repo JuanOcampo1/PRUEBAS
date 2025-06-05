@@ -2031,8 +2031,38 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
 
 
 # ───────────────────────────────────────────────────────────────
+def actualizar_celda_devol(fila, col_key, valor):
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    import os, json
+
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+
+    sheet = client.open("PEDIDOS").worksheet("DEVOLUCIONES")
+
+    columnas = {
+        "Fecha": 1,
+        "Telefono": 2,
+        "Nombre": 3,
+        "Cedula": 4,
+        "Direccion": 5,
+        "ProductoAnt": 6,
+        "Motivo": 7,
+        "ProductoNuevo": 8
+    }
+
+    col = columnas.get(col_key)
+    if col:
+        sheet.update_cell(fila, col, valor)
+
 def registrar_devolucion(telefono, est):
     from datetime import datetime
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    import os, json
 
     datos = {
         "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2046,7 +2076,17 @@ def registrar_devolucion(telefono, est):
     }
 
     registrar_orden_unificada(datos, destino="DEVOLUCIONES")
-    return 1  # o cualquier número de fila dummy, si no usas update_cell
+
+    # 🔢 Calcular la fila real donde se escribió
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("PEDIDOS").worksheet("DEVOLUCIONES")
+
+    fila_real = len(sheet.get_all_values())  # ← última fila escrita
+    return fila_real
+
 
 def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
     import gspread
@@ -2108,14 +2148,15 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
         elif destino == "DEVOLUCIONES":
             fila = [
                 fecha_actual,                         # Fecha
-                data.get("Telefono", ""),             # Teléfono
-                data.get("Nombre", ""),               # Nombre
-                data.get("Cedula", ""),               # Cédula
-                data.get("Direccion", ""),            # Dirección
-                data.get("ProductoAnt", ""),          # Producto a cambiar
-                data.get("Motivo", ""),               # Motivo de la devolución
-                data.get("ProductoNuevo", "")         # Producto que quiere adquirir
+                data.get("telefono", ""),             # Teléfono
+                data.get("nombre", ""),               # Nombre
+                data.get("cedula", ""),               # Cédula
+                data.get("direccion", ""),            # Dirección
+                data.get("producto_ant", ""),         # Producto a cambiar
+                data.get("motivo", ""),               # Motivo de la devolución
+                data.get("producto_nuevo", "")        # Producto que quiere adquirir
             ]
+
 
         else:
             logging.error(f"[SHEETS] ❌ Hoja desconocida: {destino}")
@@ -5098,67 +5139,79 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "text": "⚠️ No pude enviar el audio en este momento."
                 }
 
-    if est.get("fase") == "esperando_motivo_devolucion":
-        fila = est["devolucion_fila"]
-        actualizar_celda_devol(fila, "Motivo", txt_raw.strip())
 
-        est["fase"] = "esperando_opcion_cambio"
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🔄 ¿Quieres el *mismo producto* (garantía) o *otro producto*?\n"
-                "• Escribe **mismo** para reposición 😌\n"
-                "• Escribe **otro** para pedir un modelo diferente 🆕"
-            ),
-            parse_mode="Markdown"
-        )
-        return
-    if est.get("fase") == "esperando_opcion_cambio":
-        fila = est["devolucion_fila"]
-        t = normalize(txt_raw)
 
-        if "mismo" in t:
-            actualizar_celda_devol(fila, "ProductoNuevo", "Reemplazo del mismo producto")
-            est["fase"] = "postventa_instrucciones"
 
-        elif "otro" in t:
-            est["fase"] = "esperando_producto_nuevo"
+    # ───────────── BLOQUE TOTAL PARA DEVOLUCIÓN / GARANTÍA ─────────────
+    if est.get("fase") in (
+        "esperando_motivo_devolucion",
+        "esperando_opcion_cambio",
+        "esperando_producto_nuevo",
+        "postventa_instrucciones"
+    ):
+        fila = est.get("devolucion_fila")
+
+        if est["fase"] == "esperando_motivo_devolucion":
+            actualizar_celda_devol(fila, "Motivo", txt_raw.strip())
+            est["fase"] = "esperando_opcion_cambio"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="✏️ Escribe por favor **modelo y color** del producto que quieres recibir (ej: *DS 305 AMARILLO*).",
+                text=(
+                    "🔄 ¿Quieres el *mismo producto* (garantía) o *otro producto*?\n"
+                    "• Escribe **mismo** para reposición 😌\n"
+                    "• Escribe **otro** para pedir un modelo diferente 🆕"
+                ),
                 parse_mode="Markdown"
             )
             return
-        else:
+
+        elif est["fase"] == "esperando_opcion_cambio":
+            t = normalize(txt_raw)
+
+            if "mismo" in t:
+                actualizar_celda_devol(fila, "ProductoNuevo", "Reemplazo del mismo producto")
+                est["fase"] = "postventa_instrucciones"
+
+            elif "otro" in t:
+                est["fase"] = "esperando_producto_nuevo"
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="✏️ Escribe por favor **modelo y color** del producto que quieres recibir (ej: *DS 305 AMARILLO*).",
+                    parse_mode="Markdown"
+                )
+                return
+
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="❓ No entendí. Solo responde *mismo* o *otro*."
+                )
+                return
+
+        elif est["fase"] == "esperando_producto_nuevo":
+            actualizar_celda_devol(fila, "ProductoNuevo", txt_raw.strip())
+            est["fase"] = "postventa_instrucciones"
+
+        if est["fase"] == "postventa_instrucciones":
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="❓ No entendí. Solo responde *mismo* o *otro*."
+                text=(
+                    "✅ ¡Tu solicitud ha sido registrada!\n\n"
+                    "📦 *Sigue estas instrucciones para el cambio/devolución:*\n"
+                    "1. Coloca los zapatos en la misma caja en la que los recibiste.\n"
+                    "2. Llévalos a Servientrega o Inter Rapidísimo dentro de una bolsa.\n"
+                    "3. Envía el paquete a:\n"
+                    "   🏡 Barrio San Miguel, Calle 52 #16-74\n"
+                    "   **Nombre:** X100SAS\n"
+                    "   **Teléfono:** 324 666 6630\n"
+                    "   **NIT:** 100000000\n\n"
+                    "En cuanto recibamos tu paquete, te enviaremos tu producto totalmente nuevo. 🙌"
+                ),
+                parse_mode="Markdown"
             )
+            reset_estado(cid)
             return
-    if est.get("fase") == "esperando_producto_nuevo":
-        fila = est["devolucion_fila"]
-        actualizar_celda_devol(fila, "ProductoNuevo", txt_raw.strip())
 
-        est["fase"] = "postventa_instrucciones"
-    if est.get("fase") == "postventa_instrucciones":
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "✅ ¡Tu solicitud ha sido registrada!\n\n"
-                "📦 *Sigue estas instrucciones para el cambio/devolución:*\n"
-                "1. Coloca los zapatos en la misma caja en la que los recibiste.\n"
-                "2. Llévalos a Servientrega o Inter Rapidísimo dentro de una bolsa.\n"
-                "3. Envía el paquete a:\n"
-                "   🏡 Barrio San Miguel, Calle 52 #16-74\n"
-                "   **Nombre:** X100SAS\n"
-                "   **Teléfono:** 324 666 6630\n"
-                "   **NIT:** 100000000\n\n"
-                "En cuanto recibamos tu paquete, te enviaremos tu producto totalmente nuevo. 🙌"
-            ),
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
 
     texto = texto.lower()
 
