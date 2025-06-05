@@ -468,15 +468,17 @@ def descargar_audios_bienvenida_drive() -> None:
         service = get_drive_service()
 
         carpetas_locales: Dict[str, str] = {
-            "BIENVENIDA":        "/var/data/audios/bienvenida",
-            "CONFIANZA":         "/var/data/audios/confianza",
-            "CONTRAENTREGA":     "/var/data/audios/contraentrega",
-            "PRECIO":            "/var/data/audios/precio",
-            "REALIZAR COMPRA":   "/var/data/audios/realizar_compra",
-            "CAROS":             "/var/data/audios/caros",
-            "COSIDOS":           "/var/data/audios/cosidos",
-            "CAUCHO":            "/var/data/audios/caucho"
+                "BIENVENIDA":        "/var/data/audios/bienvenida",
+                "CONFIANZA":         "/var/data/audios/confianza",
+                "CONTRAENTREGA":     "/var/data/audios/contraentrega",
+                "PRECIO":            "/var/data/audios/precio",
+                "REALIZAR COMPRA":   "/var/data/audios/realizar_compra",
+                "CAROS":             "/var/data/audios/caros",
+                "COSIDOS":           "/var/data/audios/cosidos",
+                "CAUCHO":            "/var/data/audios/caucho",
+                "VARIOS PRECIOS":    "/var/data/audios/varios_precios"
         }
+
 
         # Crear carpetas locales si no existen
         for ruta in carpetas_locales.values():
@@ -2029,6 +2031,22 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
 
 
 # ───────────────────────────────────────────────────────────────
+def registrar_devolucion(telefono, est):
+    from datetime import datetime
+
+    datos = {
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "telefono": telefono,
+        "nombre": est.get("nombre", ""),
+        "cedula": est.get("cedula", ""),
+        "direccion": est.get("direccion", ""),
+        "producto_ant": f"{est.get('marca', '')} {est.get('modelo', '')} {est.get('color', '')}",
+        "motivo": "",
+        "producto_nuevo": ""
+    }
+
+    registrar_orden_unificada(datos, destino="DEVOLUCIONES")
+    return 1  # o cualquier número de fila dummy, si no usas update_cell
 
 def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
     import gspread
@@ -2873,12 +2891,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     text="😕 Aún no tengo el precio exacto de ese modelo. Déjame verificarlo."
                 )
         else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=("Para darte el precio necesito saber la referencia o repetirla. "
-                      "¿Puedes decirme cuál estás mirando,")
-            )
-        return
+            try:
+                ruta_audio = "/var/data/audios/varios_precios/varios.mp3"
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio varios.mp3")
+
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "varios.mp3",
+                    "text": "🎧 Para darte el precio necesito saber cuál estás mirando. Aquí tienes una explicación:"
+                }
+
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio varios.mp3: {e}")
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=("Para darte el precio necesito saber la referencia o repetirla. "
+                          "¿Puedes decirme cuál estás mirando?")
+                )
+
 
 
     # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
