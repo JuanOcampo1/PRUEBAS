@@ -5140,7 +5140,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 }
 
 
-
+#DEVOLUCIONES
 
     # ───────────── BLOQUE TOTAL PARA DEVOLUCIÓN / GARANTÍA ─────────────
     if est.get("fase") in (
@@ -5152,7 +5152,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         fila = est.get("devolucion_fila")
 
         if est["fase"] == "esperando_motivo_devolucion":
-            actualizar_celda_devol(fila, "Motivo", txt_raw.strip())
+            actualizar_celda_devol(fila, "Motivo", texto.strip())  # ✅ corregido aquí
             est["fase"] = "esperando_opcion_cambio"
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -5164,6 +5164,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 parse_mode="Markdown"
             )
             return
+
 
         elif est["fase"] == "esperando_opcion_cambio":
             t = normalize(txt_raw)
