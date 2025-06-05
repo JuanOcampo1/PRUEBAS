@@ -4683,8 +4683,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         with open(path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         return f"data:{tipo};base64,{b64}"
-
-     # ─────────── Preguntas frecuentes (FAQ por IA) ───────────
+    # ─────────── Preguntas frecuentes (FAQ por IA) ───────────
 
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
         faq_detectada = detectar_match_faq(texto, FAQ_ALIAS)
@@ -4700,6 +4699,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+
         elif faq_detectada == "desconfianza":
             carpeta_videos = "/var/data/videos"
             audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
@@ -4742,11 +4742,16 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     except Exception as e:
                         logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
 
-            await reanudar_fase_actual(cid, ctx, est)
-            return {"type": "multi", "messages": mensajes}
+            # 🟢 Simplemente devolver mensajes (sin usar ctx)
+            return {
+                "type": "multi",
+                "messages": mensajes
+            }
 
-        #DEVOLUCIONES
+        # DEVOLUCIONES
         elif faq_detectada == "devolucion_o_garantia":
+            numero = str(cid)  # ← ✅ AÑADE ESTA LÍNEA
+
             # Guardar fila en Sheets
             fila = registrar_devolucion(numero, est)
 
