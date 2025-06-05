@@ -1,4 +1,3 @@
-#FALLA PER FUNCION TALLA SIN LENGUETA
 
 # ——— Librerías estándar de Python ———
 import os
@@ -133,7 +132,19 @@ from rapidfuzz import process
 
 # ─── Alias para preguntas frecuentes (FAQ) ───
 FAQ_ALIAS = {
-        "redes": [
+    "devolucion_o_garantia": [
+        "quiero devolver", "hacer devolución", "hacer devolucion", "se dañaron",
+        "cambiar el producto", "se peló", "se pelaron", "vino defectuoso", "vino dañado",
+        "producto con defecto", "necesito garantia", "quiero garantia", "defectuoso",
+        "garantia", "zapato malo", "defecto de fabrica", "vino roto"
+    ],
+
+    "desconfianza": [
+        "no confio", "desconfio", "ROBO", "robaron", "roban",
+        "estafaron", "desconfianza","tumbado",
+        "robar", "Yo no envio plata antes"
+    ],
+    "redes": [
         "redes sociales", "instagram", "facebook", "tiktok", "pagina web", "web",
         "tienen instagram", "tienen facebook", "tienen tiktok",
         "como los encuentro en redes", "sus redes", "siguen en redes"
@@ -149,7 +160,8 @@ FAQ_ALIAS = {
         "caucho", "goma", "suela de caucho", "es de caucho", "la suela es de",
         "la suela de qué es", "la suela de que es", "material de la suela"
     ],
-    "tiempo_entrega": [
+
+     "tiempo_entrega": [
         "cuanto demora", "cuanto tarda", "cuanto se demora", "cuando llega", "en cuantos dias",
         "si lo pido hoy", "me llega rapido", "cuanto se tarda", "tarda en llegar"
     ],
@@ -1307,7 +1319,7 @@ async def enviar_welcome_venom(cid: str, tipo: str = "general"):
                 {
                     "type": "text",
                     "text": (
-                        "🙋‍♂️ Hola, dime tu *nombre* y desde qué *ciudad* nos escribes 🏙️✍️ "
+                        "🙋‍♂️ Porfavor dime tu *nombre* y desde qué *ciudad* nos escribes 🏙️✍️ "
                         "para darte una asesoría más personalizada 💬😊"
                     ),
                     "parse_mode": "Markdown"
@@ -2055,6 +2067,7 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
                 data.get("fase_actual", "Sin registrar"),
                 data.get("Estado", "PENDIENTE")
             ]
+
         elif destino == "PENDIENTES":
             fila = [
                 fecha_actual,
@@ -2063,6 +2076,7 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
                 data.get("Producto", "No informado"),
                 data.get("Pago", "No indicado")  # Se usa "Pago" como campo 'Día/Hora contacto'
             ]
+
         elif destino == "ADDI":
             fila = [
                 fecha_actual,
@@ -2071,6 +2085,20 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
                 data.get("Teléfono", "No informado"),
                 data.get("Correo", "No informado"),
             ]
+
+        # 🆕 DEVOLUCIONES
+        elif destino == "DEVOLUCIONES":
+            fila = [
+                fecha_actual,                         # Fecha
+                data.get("Telefono", ""),             # Teléfono
+                data.get("Nombre", ""),               # Nombre
+                data.get("Cedula", ""),               # Cédula
+                data.get("Direccion", ""),            # Dirección
+                data.get("ProductoAnt", ""),          # Producto a cambiar
+                data.get("Motivo", ""),               # Motivo de la devolución
+                data.get("ProductoNuevo", "")         # Producto que quiere adquirir
+            ]
+
         else:
             logging.error(f"[SHEETS] ❌ Hoja desconocida: {destino}")
             return False
@@ -2083,7 +2111,6 @@ def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
     except Exception as e:
         logging.exception(f"[SHEETS] ❌ Error escribiendo en hoja '{destino}': {e}")
         return False
-
 
 
 # ───────────────────────────────────────────────────────────────
@@ -2603,85 +2630,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             "parse_mode": "Markdown"
         }
-
-# ─────────────────────────────────────────────
-# 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
-# ─────────────────────────────────────────────
-    texto_normalizado = normalize(txt)
-
-    # Palabras clave que siempre deben activar la respuesta
-    palabras_clave_fijas = [
-        "robar", "roban", "robo", "estafa", "estafan", "estafaron", "estafas",
-        "fraude", "tumbo", "tumbaron"
-    ]
-
-    # Frases comunes de desconfianza
-    frases_desconfianza = [
-        "no confio", "desconfio", "me han robado", "ya me robaron", "y si me roban",
-        "me estafaron", "ya me estafaron", "me hicieron el robo", "como se que no me van a robar",
-        "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
-        "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
-        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "quiero pagar al recibir",
-        "pago al recibir", "solo contraentrega", "pago cuando llegue", "pago cuando me llegue",
-        "me tumbaron una vez", "me jodieron", "ya me tumbaron", "no vuelvo a caer",
-        "yo como se que no me roban", "eso me paso antes", "me han robado antes", "me da cosa pagar",
-        "no puedo pagar sin saber", "no mando dinero asi", "no conozco su tienda", "no estoy seguro",
-        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable",
-        "no tengo pruebas", "es seguro esto", "no me siento comodo pagando", "mejor contraentrega",
-        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "y si no me llega",
-        "y si no llega", "y si me estafan", "ya me tumbaron plata", "me hicieron perder plata",
-        "me quitaron la plata", "me da miedo que me estafen", "esto no parece seguro",
-        "no se ve seguro", "y si es mentira", "y si es estafa", "esto parece raro", "se ve raro",
-        "esto huele a estafa", "muy sospechoso", "no quiero perder plata", "no me arriesgo",
-        "no voy a arriesgar mi dinero", "no envio plata por adelantado", "yo no envio plata",
-        "yo no mando plata", "yo no pago por adelantado", "envio plata y me roban"
-    ]
-
-    # 🟥 Desconfianza: envía audio + videos de confianza
-    if any(frase in texto_normalizado for frase in frases_desconfianza):
-        carpeta_videos = "/var/data/videos"
-        audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
-
-        mensajes = []
-
-        # 🎧 Primero: audio
-        if os.path.exists(audio_path):
-            try:
-                with open(audio_path, "rb") as f:
-                    mensajes.append({
-                        "type": "audio",
-                        "base64": base64.b64encode(f.read()).decode("utf-8"),
-                        "mimetype": "audio/mpeg",
-                        "filename": "Desconfianza.mp3",
-                        "text": "🎧 Escucha este audio breve también:"
-                    })
-            except Exception as e:
-                logging.warning(f"⚠️ No se pudo leer el audio de confianza: {e}")
-
-        # ✅ Lista exacta de videos válidos
-        videos_confianza = {
-            "video_confianza.mp4",
-            "WhatsApp Video 2025-05-28 at 4.26.50 PM.mp4"
-        }
-
-        # 🎥 Luego: videos
-        for archivo in sorted(os.listdir(carpeta_videos)):
-            if archivo in videos_confianza:
-                ruta_video = os.path.join(carpeta_videos, archivo)
-                try:
-                    with open(ruta_video, "rb") as f:
-                        mensajes.append({
-                            "type": "video",
-                            "base64": base64.b64encode(f.read()).decode("utf-8"),
-                            "mimetype": "video/mp4",
-                            "filename": archivo,
-                            "text": "🎥 Mira este video de confianza:"
-                        })
-                except Exception as e:
-                    logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
-
-        await reanudar_fase_actual(cid, ctx, est)
-        return {"type": "multi", "messages": mensajes}
 
 
     # 🟨 Detección universal de color — funciona en cualquier fase
@@ -3577,6 +3525,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 📧 Correo del cliente
     if est.get("fase") == "esperando_correo":
+        texto_limpio = normalize(txt_raw)
+
+        # ✅ Si envía un correo válido
         if re.match(r"[^@]+@[^@]+\.[^@]+", txt_raw):
             est["correo"] = txt_raw
             est["fase"] = "esperando_telefono"
@@ -3585,13 +3536,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="¿Tu número de teléfono? 📱",
                 parse_mode="Markdown"
             )
+
+        # ✅ Si dice que no quiere darlo
+        elif any(p in texto_limpio for p in ["no tengo correo", "no quiero poner", "no doy mi correo", "no tengo", "no quiero"]):
+            est["correo"] = "No proporcionado"
+            est["fase"] = "esperando_telefono"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="No hay problema 👍 ¿Tu número de teléfono? 📱",
+                parse_mode="Markdown"
+            )
+
+        # ❌ Si no es válido ni lo rechaza explícitamente
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Necesito que envies tu correo para podes seguir con la compra de tu producto😊.",
+                text="Necesito que envíes tu correo o escribas que no tienes para poder continuar 😊.",
                 parse_mode="Markdown"
             )
         return
+
 
     # 📞 Teléfono del cliente
     if est.get("fase") == "esperando_telefono":
@@ -3618,7 +3582,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["fase"] = "esperando_ciudad"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿En qué ciudad estás? 🏙️",
+                text="¿Para el envio escribeme tu ciudad porfavor? 🏙️",
                 parse_mode="Markdown"
             )
         else:
@@ -3635,7 +3599,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_provincia"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿En qué departamento o provincia estás? 🏞️",
+            text="¿Dime en qué departamento o provincia estás? 🏞️",
             parse_mode="Markdown"
         )
         return
@@ -3646,7 +3610,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_direccion"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿Dirección exacta de envío? 🏡",
+            text="¿Ahora regalame la dirección exacta para el envío? 🏡",
             parse_mode="Markdown"
         )
         return
@@ -4044,45 +4008,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-
-
-
-
-
-    # 🚚 Rastrear pedido
-    if est.get("fase") == "esperando_numero_rastreo":
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="📦 Puedes rastrear tu pedido aquí:\nhttps://www.instagram.com/juanp_ocampo/",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
-
-    # 🔄 Solicitud de devolución
-    if est.get("fase") == "esperando_numero_devolucion":
-        est["referencia"] = txt_raw.strip()
-        est["fase"] = "esperando_motivo_devolucion"
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="📝 ¿Cuál es el motivo de la devolución?",
-            parse_mode="Markdown"
-        )
-        return
-
-    if est.get("fase") == "esperando_motivo_devolucion":
-        enviar_correo(
-            EMAIL_DEVOLUCIONES,
-            f"Solicitud de Devolución {NOMBRE_NEGOCIO}",
-            f"Venta: {est['referencia']}\nMotivo: {txt_raw}"
-        )
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ Solicitud de devolución enviada exitosamente.",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
 
     # 🎙️ Procesar audio
     if update.message.voice or update.message.audio:
@@ -4739,6 +4664,66 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+        elif faq_detectada == "desconfianza":
+            carpeta_videos = "/var/data/videos"
+            audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
+
+            mensajes = []
+
+            # 🎧 Primero: audio
+            if os.path.exists(audio_path):
+                try:
+                    with open(audio_path, "rb") as f:
+                        mensajes.append({
+                            "type": "audio",
+                            "base64": base64.b64encode(f.read()).decode("utf-8"),
+                            "mimetype": "audio/mpeg",
+                            "filename": "Desconfianza.mp3",
+                            "text": "🎧 Escucha este audio breve también:"
+                        })
+                except Exception as e:
+                    logging.warning(f"⚠️ No se pudo leer el audio de confianza: {e}")
+
+            # ✅ Lista exacta de videos válidos
+            videos_confianza = {
+                "video_confianza.mp4",
+                "WhatsApp Video 2025-05-28 at 4.26.50 PM.mp4"
+            }
+
+            # 🎥 Luego: videos
+            for archivo in sorted(os.listdir(carpeta_videos)):
+                if archivo in videos_confianza:
+                    ruta_video = os.path.join(carpeta_videos, archivo)
+                    try:
+                        with open(ruta_video, "rb") as f:
+                            mensajes.append({
+                                "type": "video",
+                                "base64": base64.b64encode(f.read()).decode("utf-8"),
+                                "mimetype": "video/mp4",
+                                "filename": archivo,
+                                "text": "🎥 Mira este video de confianza:"
+                            })
+                    except Exception as e:
+                        logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
+
+            await reanudar_fase_actual(cid, ctx, est)
+            return {"type": "multi", "messages": mensajes}
+
+        #DEVOLUCIONES
+        elif faq_detectada == "devolucion_o_garantia":
+            # Guardar fila en Sheets
+            fila = registrar_devolucion(numero, est)
+
+            # Activar flujo estructurado
+            est.update({
+                "fase": "esperando_motivo_devolucion",
+                "devolucion_fila": fila
+            })
+
+            return {
+                "type": "text",
+                "text": "📝 ¡Entendido! Cuéntame, ¿cuál es el motivo de la devolución o cambio? 🤔"
+            }
 
         elif faq_detectada == "contraentrega":
             try:
@@ -4779,7 +4764,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             mensajes = [{
                 "type": "text",
                 "text": (
-                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                    "📍 Estamos ubicados en *Bucaramanga, Santander*.\n\n"
                     "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
                     "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
                     "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
@@ -5072,7 +5057,67 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "text": "⚠️ No pude enviar el audio en este momento."
                 }
 
+    if est.get("fase") == "esperando_motivo_devolucion":
+        fila = est["devolucion_fila"]
+        actualizar_celda_devol(fila, "Motivo", txt_raw.strip())
 
+        est["fase"] = "esperando_opcion_cambio"
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🔄 ¿Quieres el *mismo producto* (garantía) o *otro producto*?\n"
+                "• Escribe **mismo** para reposición 😌\n"
+                "• Escribe **otro** para pedir un modelo diferente 🆕"
+            ),
+            parse_mode="Markdown"
+        )
+        return
+    if est.get("fase") == "esperando_opcion_cambio":
+        fila = est["devolucion_fila"]
+        t = normalize(txt_raw)
+
+        if "mismo" in t:
+            actualizar_celda_devol(fila, "ProductoNuevo", "Reemplazo del mismo producto")
+            est["fase"] = "postventa_instrucciones"
+
+        elif "otro" in t:
+            est["fase"] = "esperando_producto_nuevo"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="✏️ Escribe por favor **modelo y color** del producto que quieres recibir (ej: *DS 305 AMARILLO*).",
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❓ No entendí. Solo responde *mismo* o *otro*."
+            )
+            return
+    if est.get("fase") == "esperando_producto_nuevo":
+        fila = est["devolucion_fila"]
+        actualizar_celda_devol(fila, "ProductoNuevo", txt_raw.strip())
+
+        est["fase"] = "postventa_instrucciones"
+    if est.get("fase") == "postventa_instrucciones":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "✅ ¡Tu solicitud ha sido registrada!\n\n"
+                "📦 *Sigue estas instrucciones para el cambio/devolución:*\n"
+                "1. Coloca los zapatos en la misma caja en la que los recibiste.\n"
+                "2. Llévalos a Servientrega o Inter Rapidísimo dentro de una bolsa.\n"
+                "3. Envía el paquete a:\n"
+                "   🏡 Barrio San Miguel, Calle 52 #16-74\n"
+                "   **Nombre:** X100SAS\n"
+                "   **Teléfono:** 324 666 6630\n"
+                "   **NIT:** 100000000\n\n"
+                "En cuanto recibamos tu paquete, te enviaremos tu producto totalmente nuevo. 🙌"
+            ),
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
+        return
 
     texto = texto.lower()
 
